@@ -41,3 +41,7 @@ _jacobian_type(S::Type, T::Type) = throw(ArgumentError(
 # Number stays itself; SVector{N, F} maps to the canonical square SMatrix{N, N, F};
 # same-type T returns T (e.g. SMatrix is its own identity space).
 _unity_space(::Type{T}) where {T} = _jacobian_type(T, T)
+
+#_value_space(::Type{<: Number}) = Bool
+#_value_space(::Type{<: SMatrix{N, N, T}}) where {N, T} =
+#    similar_type(SVector{N, T}, Bool)

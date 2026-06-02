@@ -9,10 +9,13 @@ export AbstractScalar,
        ScalarOne,
        ScalarCall,
        ScalarRef,
-       @scalar
+       @scalar,
+       asscalar,
+       simplify
 
 include("utils.jl")
 include("types.jl")
+include("simplify.jl")
 include("display.jl")
 
 end # module

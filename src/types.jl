@@ -30,7 +30,7 @@ ScalarSym{S}() where {S} = ScalarSym{S, Float64}()
     @scalar name [T = Float64]
 
 Bind `name` to `ScalarSym{:name, T}()`. `@scalar x` ≡
-`x = ScalarSym{:x, Float64}()`; `@scalar τ Float32` ≡
+`x = ScalarSym{:x, Float64}()`; `@scalar x Float32` ≡
 `x = ScalarSym{:x, Float32}()`.
 """
 macro scalar(name, T = :Float64)
