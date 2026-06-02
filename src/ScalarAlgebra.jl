@@ -1,0 +1,3 @@
+module ScalarAlgebra
+
+end # module

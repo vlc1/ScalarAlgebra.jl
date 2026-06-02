@@ -1,0 +1,13 @@
+name = "ScalarAlgebra"
+uuid = "60794e7d-98f0-4a77-a4fa-730d5cb83166"
+version = "0.1.0"
+authors = ["Vincent Le Chenadec <vincentlechenadec@gmail.com>"]
+
+[compat]
+julia = "1.0"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
