@@ -1,6 +1,153 @@
 using Test
+using StaticArrays
 using ScalarAlgebra
 
 @testset "ScalarAlgebra.jl" begin
-    # Add tests here
+
+    @testset "ScalarSym" begin
+        # default T = Float64
+        sc = @inferred ScalarSym{:x}()
+        @test sc isa ScalarSym{:x, Float64}
+        @test eltype(sc) === Float64
+
+        # explicit concrete T (Number)
+        sc32 = @inferred ScalarSym{:x, Float32}()
+        @test sc32 isa ScalarSym{:x, Float32}
+
+        # SVector element type
+        sc_v = @inferred ScalarSym{:v, SVector{3, Float64}}()
+        @test sc_v isa ScalarSym{:v, SVector{3, Float64}}
+        @test eltype(sc_v) === SVector{3, Float64}
+
+        # abstract T → ArgumentError
+        @test_throws ArgumentError ScalarSym{:x, AbstractFloat}()
+    end
+
+    @testset "ScalarConst" begin
+        # infer T from value (Number)
+        sc = @inferred ScalarConst(1.0)
+        @test sc isa ScalarConst{Float64}
+        @test sc.val === 1.0
+        @test eltype(sc) === Float64
+
+        # infer T from value (SVector)
+        v = SVector(1.0, 2.0, 3.0)
+        sc_v = @inferred ScalarConst(v)
+        @test sc_v isa ScalarConst{SVector{3, Float64}}
+        @test sc_v.val === v
+
+        # explicit T with implicit conversion
+        sc_ex = @inferred ScalarConst{Float64}(1)
+        @test sc_ex isa ScalarConst{Float64}
+        @test sc_ex.val === 1.0
+
+        # idempotent: AbstractScalar passed through unchanged
+        inner = ScalarConst(2.0)
+        @test ScalarConst(inner) === inner
+
+        # abstract T → ArgumentError
+        @test_throws ArgumentError ScalarConst{AbstractFloat}(1.0)
+    end
+
+    @testset "ScalarZero" begin
+        # direct Bool construction
+        sz = @inferred ScalarZero{Bool}()
+        @test sz isa ScalarZero{Bool}
+        @test eltype(sz) === Bool
+
+        # via Type{Number} → Bool
+        sz_t = @inferred ScalarZero(Float64)
+        @test sz_t isa ScalarZero{Bool}
+
+        # via Number value → Bool
+        sz_v = @inferred ScalarZero(1.0)
+        @test sz_v isa ScalarZero{Bool}
+
+        # via SVector value → SVector{N,Bool}
+        sz_sv = @inferred ScalarZero(SVector(1.0, 2.0))
+        @test sz_sv isa ScalarZero{SVector{2, Bool}}
+
+        # non-Bool-shaped T → ArgumentError
+        @test_throws ArgumentError ScalarZero{Float64}()
+    end
+
+    @testset "ScalarOne" begin
+        # direct Bool construction
+        so = @inferred ScalarOne{Bool}()
+        @test so isa ScalarOne{Bool}
+        @test eltype(so) === Bool
+
+        # via Type{Number} → Bool (unity space of Float64 is Float64, bool-shape → Bool)
+        so_t = @inferred ScalarOne(Float64)
+        @test so_t isa ScalarOne{Bool}
+
+        # via Number value → Bool
+        so_v = @inferred ScalarOne(1.0)
+        @test so_v isa ScalarOne{Bool}
+
+        # via SVector value → SMatrix{N,N,Bool,N*N}
+        so_sv = @inferred ScalarOne(SVector(1.0, 2.0))
+        @test so_sv isa ScalarOne{SMatrix{2, 2, Bool, 4}}
+
+        # SVector{N,F} directly: not Bool-shaped → ArgumentError
+        @test_throws ArgumentError ScalarOne{SVector{2, Float64}}()
+    end
+
+    @testset "ScalarCall" begin
+        x = ScalarSym{:x}()          # Float64
+        y = ScalarSym{:y}()          # Float64
+        v = ScalarSym{:v, SVector{3, Float64}}()
+
+        # binary, Number + Number
+        sc_add = @inferred x + y
+        @test sc_add isa ScalarCall
+        @test eltype(sc_add) === Float64
+
+        # binary, AbstractScalar op literal (lifts via asscalar)
+        sc_mul = @inferred x * 2.0
+        @test sc_mul isa ScalarCall
+        @test eltype(sc_mul) === Float64
+
+        # unary, Number
+        sc_neg = @inferred -x
+        @test sc_neg isa ScalarCall
+        @test eltype(sc_neg) === Float64
+
+        # unary, SVector element type
+        sc_neg_v = @inferred -v
+        @test sc_neg_v isa ScalarCall
+        @test eltype(sc_neg_v) === SVector{3, Float64}
+
+        # binary, SVector + SVector
+        w = ScalarSym{:w, SVector{3, Float64}}()
+        sc_add_v = @inferred v + w
+        @test sc_add_v isa ScalarCall
+        @test eltype(sc_add_v) === SVector{3, Float64}
+    end
+
+    @testset "ScalarRef" begin
+        # linear indexing with SVector
+        v = ScalarSym{:v, SVector{3, Float64}}()
+        i = ScalarSym{:i, Int}()
+        sc_lin = @inferred v[i]
+        @test sc_lin isa ScalarRef
+        @test eltype(sc_lin) === Float64
+
+        # linear indexing with Int literal (lifted to ScalarConst)
+        sc_lin_lit = @inferred v[1]
+        @test sc_lin_lit isa ScalarRef
+        @test eltype(sc_lin_lit) === Float64
+
+        # cartesian indexing with SMatrix
+        m = ScalarSym{:m, SMatrix{3, 3, Float64, 9}}()
+        j = ScalarSym{:j, Int}()
+        sc_cart = @inferred m[i, j]
+        @test sc_cart isa ScalarRef
+        @test eltype(sc_cart) === Float64
+
+        # verify indices are wrapped in tuple
+        @test sc_lin.indices isa Tuple{Vararg{AbstractScalar{Int}}}
+        @test sc_cart.indices isa Tuple{Vararg{AbstractScalar{Int}}}
+    end
+
 end
