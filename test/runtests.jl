@@ -154,6 +154,9 @@ using ScalarAlgebra
         x = ScalarSym{:x}()
         z = ScalarZero(Float64)
         z32 = ScalarZero(Float32)
+        c2 = ScalarConst(2.0)
+        c3 = ScalarConst(3.0)
+        u = ScalarOne(Float64)
 
         # additive identity: x + 0 = x
         expr1 = x + z
@@ -170,6 +173,87 @@ using ScalarAlgebra
         result3 = @inferred simplify(expr3)
         @test result3 isa ScalarZero
         @test eltype(result3) === Bool
+
+        # constant folding: ScalarConst + ScalarConst
+        expr4 = c2 + c3
+        result4 = @inferred simplify(expr4)
+        @test result4 isa ScalarConst{Float64}
+        @test result4.val === 5.0
+
+        # constant folding: ScalarOne + ScalarConst → 1 + const
+        expr5 = u + c2
+        result5 = @inferred simplify(expr5)
+        @test result5 isa ScalarConst{Float64}
+        @test result5.val === 3.0
+
+        # constant folding: ScalarConst + ScalarOne → const + 1
+        expr6 = c2 + u
+        result6 = @inferred simplify(expr6)
+        @test result6 isa ScalarConst{Float64}
+        @test result6.val === 3.0
+
+        # single-arg addition: +(x) = x
+        expr7 = ScalarCall(+, (x,))
+        result7 = @inferred simplify(expr7)
+        @test result7 === x
+    end
+
+    @testset "subtract" begin
+        x = ScalarSym{:x}()
+        z = ScalarZero(Float64)
+        z32 = ScalarZero(Float32)
+        c2 = ScalarConst(2.0)
+        c3 = ScalarConst(3.0)
+        u = ScalarOne(Float64)
+
+        # subtractive identity: x - 0 = x
+        expr1 = x - z
+        result1 = @inferred simplify(expr1)
+        @test result1 === x
+
+        # subtractive identity: 0 - 0 = 0 with promoted type
+        expr2 = z - z32
+        result2 = @inferred simplify(expr2)
+        @test result2 isa ScalarZero
+        @test eltype(result2) === Bool
+
+        # negation: 0 - x = -x
+        expr3 = z - x
+        result3 = @inferred simplify(expr3)
+        @test result3 isa ScalarCall
+        @test result3.fn === (-)
+        @test only(result3.args) === x
+
+        # constant folding: ScalarConst - ScalarConst
+        expr4 = c3 - c2
+        result4 = @inferred simplify(expr4)
+        @test result4 isa ScalarConst{Float64}
+        @test result4.val === 1.0
+
+        # constant folding: ScalarOne - ScalarConst
+        expr5 = u - c2
+        result5 = @inferred simplify(expr5)
+        @test result5 isa ScalarConst{Float64}
+        @test result5.val === -1.0
+
+        # constant folding: ScalarConst - ScalarOne
+        expr6 = c2 - u
+        result6 = @inferred simplify(expr6)
+        @test result6 isa ScalarConst{Float64}
+        @test result6.val === 1.0
+
+        # double negation: -(-x) = x
+        neg_x = ScalarCall(-, (x,))
+        expr7 = ScalarCall(-, (neg_x,))
+        result7 = @inferred simplify(expr7)
+        @test result7 === x
+
+        # unary negation: -(x) = -x
+        expr8 = -x
+        result8 = @inferred simplify(expr8)
+        @test result8 isa ScalarCall
+        @test result8.fn === (-)
+        @test only(result8.args) === x
     end
 
 end

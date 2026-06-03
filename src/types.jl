@@ -78,6 +78,9 @@ end
 ScalarZero(T::Type) = ScalarZero{_to_bool_shape(T)}()
 ScalarZero(::T) where {T} = ScalarZero{_to_bool_shape(T)}()
 
+ScalarZero(::Type{<: AbstractScalar{T}}) where {T} = ScalarZero(T)
+ScalarZero(::T) where {T <: AbstractScalar} = ScalarZero(T)
+
 """
     ScalarOne{T}()
 
@@ -101,6 +104,9 @@ end
 
 ScalarOne(::Type{T}) where {T} = ScalarOne{_to_bool_shape(_unity_space(T))}()
 ScalarOne(::T) where {T} = ScalarOne{_to_bool_shape(_unity_space(T))}()
+
+ScalarOne(::Type{<: AbstractScalar{T}}) where {T} = ScalarOne(T)
+ScalarOne(::T) where {T <: AbstractScalar} = ScalarOne(T)
 
 """
     ScalarCall(fn, args::Tuple{Vararg{AbstractScalar}})
