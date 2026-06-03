@@ -150,4 +150,26 @@ using ScalarAlgebra
         @test sc_cart.indices isa Tuple{Vararg{AbstractScalar{Int}}}
     end
 
+    @testset "simplify" begin
+        x = ScalarSym{:x}()
+        z = ScalarZero(Float64)
+        z32 = ScalarZero(Float32)
+
+        # additive identity: x + 0 = x
+        expr1 = x + z
+        result1 = @inferred simplify(expr1)
+        @test result1 === x
+
+        # additive identity: 0 + x = x
+        expr2 = z + x
+        result2 = @inferred simplify(expr2)
+        @test result2 === x
+
+        # additive identity: 0 + 0 = 0 with promoted type
+        expr3 = z + z32
+        result3 = @inferred simplify(expr3)
+        @test result3 isa ScalarZero
+        @test eltype(result3) === Bool
+    end
+
 end
