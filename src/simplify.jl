@@ -41,8 +41,7 @@ _simplify_sub((a, b)::Tuple{AbstractScalar, AbstractScalar}) = a - b
 _simplify_sub((a,)::Tuple{ScalarCall{typeof(-), <: Tuple{AbstractScalar}}}) = only(a.args)
 
 _simplify_sub((a, _)::Tuple{AbstractScalar, ScalarZero}) = a
-_simplify_sub((_, b)::Tuple{ScalarZero, AbstractScalar}) =
-    _simplify_sub((b,))
+_simplify_sub((_, b)::Tuple{ScalarZero, AbstractScalar}) = -b
 _simplify_sub((a, b)::Tuple{ScalarZero, ScalarZero}) =
     ScalarZero(Base.promote_op(+, eltype(a), eltype(b)))
 
@@ -52,5 +51,29 @@ _simplify_sub((a, b)::Tuple{ScalarOne, ScalarConst}) =
     ScalarConst(one(eltype(a)) - b.val)
 _simplify_sub((a, b)::Tuple{ScalarConst, ScalarOne}) =
     ScalarConst(a.val - one(eltype(b)))
+
+# multiplicative identities
+_simplify_call(::typeof(*), args) = _simplify_mul(args)
+
+_simplify_mul((a, b)::Tuple{AbstractScalar, AbstractScalar}) = a * b
+
+_simplify_mul((a, b)::Tuple{AbstractScalar, ScalarZero}) =
+    ScalarZero(Base.promote_op(*, eltype(a), eltype(b)))
+_simplify_mul((a, b)::Tuple{ScalarZero, AbstractScalar}) =
+    ScalarZero(Base.promote_op(*, eltype(a), eltype(b)))
+_simplify_mul((a, b)::Tuple{ScalarZero, ScalarZero}) =
+    ScalarZero(Base.promote_op(*, eltype(a), eltype(b)))
+
+_simplify_mul((a, b)::Tuple{AbstractScalar, ScalarOne}) =
+    Base.promote_op(*, eltype(a), eltype(b)) === eltype(a) ? a : a * b
+_simplify_mul((a, b)::Tuple{ScalarOne, AbstractScalar}) =
+    Base.promote_op(*, eltype(a), eltype(b)) === eltype(b) ? b : a * b
+_simplify_mul((a, b)::Tuple{ScalarOne, ScalarOne}) =
+    ScalarOne(Base.promote_op(*, eltype(a), eltype(b)))
+
+_simplify_mul((a, b)::Tuple{ScalarZero, ScalarOne}) =
+    ScalarZero(Base.promote_op(*, eltype(a), eltype(b)))
+_simplify_mul((a, b)::Tuple{ScalarOne, ScalarZero}) =
+    ScalarZero(Base.promote_op(*, eltype(a), eltype(b)))
 
 # ScalarRef
