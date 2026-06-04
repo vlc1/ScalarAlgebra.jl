@@ -256,4 +256,116 @@ using ScalarAlgebra
         @test only(result8.args) === x
     end
 
+    @testset "rdivide" begin
+        x = ScalarSym{:x}()
+        z = ScalarZero(Float64)
+        z32 = ScalarZero(Float32)
+        c2 = ScalarConst(2.0)
+        c3 = ScalarConst(3.0)
+        u = ScalarOne(Float64)
+
+        # right-division identity: x / 1 = x
+        expr1 = x / u
+        result1 = @inferred simplify(expr1)
+        @test result1 === x
+
+        # zero-annihilation: 0 / x = 0
+        expr2 = z / x
+        result2 = @inferred simplify(expr2)
+        @test result2 isa ScalarZero
+        @test eltype(result2) === Bool
+
+        # constant folding: ScalarConst / ScalarConst
+        expr3 = c3 / c2
+        result3 = @inferred simplify(expr3)
+        @test result3 isa ScalarConst{Float64}
+        @test result3.val === 1.5
+
+        # ScalarOne / ScalarConst (identity rule doesn't apply: 1 / x ≠ 1)
+        expr4 = u / c2
+        result4 = @inferred simplify(expr4)
+        @test result4 isa ScalarCall
+        @test result4.fn === (/)
+
+        # ScalarConst / ScalarOne (identity: x / 1 = x)
+        expr5 = c2 / u
+        result5 = @inferred simplify(expr5)
+        @test result5 === c2
+
+        # ScalarOne / ScalarOne
+        expr6 = u / u
+        result6 = @inferred simplify(expr6)
+        @test result6 isa ScalarOne
+        @test eltype(result6) === Bool
+
+        # ScalarSym / same ScalarSym: x / x = 1
+        expr7 = x / x
+        result7 = @inferred simplify(expr7)
+        @test result7 isa ScalarOne
+        @test eltype(result7) === Bool
+
+        # ScalarSym / different ScalarSym: x / y = (x / y) (no simplification)
+        y = ScalarSym{:y}()
+        expr8 = x / y
+        result8 = @inferred simplify(expr8)
+        @test result8 isa ScalarCall
+        @test result8.fn === (/)
+    end
+
+    @testset "ldivide" begin
+        x = ScalarSym{:x}()
+        z = ScalarZero(Float64)
+        z32 = ScalarZero(Float32)
+        c2 = ScalarConst(2.0)
+        c3 = ScalarConst(3.0)
+        u = ScalarOne(Float64)
+
+        # left-division identity: 1 \ x = x
+        expr1 = u \ x
+        result1 = @inferred simplify(expr1)
+        @test result1 === x
+
+        # zero-annihilation: x \ 0 = 0
+        expr2 = x \ z
+        result2 = @inferred simplify(expr2)
+        @test result2 isa ScalarZero
+        @test eltype(result2) === Bool
+
+        # constant folding: ScalarConst \ ScalarConst
+        expr3 = c2 \ c3
+        result3 = @inferred simplify(expr3)
+        @test result3 isa ScalarConst{Float64}
+        @test result3.val === 1.5
+
+        # ScalarOne \ ScalarConst (identity: 1 \ x = x)
+        expr4 = u \ c2
+        result4 = @inferred simplify(expr4)
+        @test result4 === c2
+
+        # ScalarConst \ ScalarOne (identity rule doesn't apply: x \ 1 ≠ x)
+        expr5 = c2 \ u
+        result5 = @inferred simplify(expr5)
+        @test result5 isa ScalarCall
+        @test result5.fn === (\)
+
+        # ScalarOne \ ScalarOne
+        expr6 = u \ u
+        result6 = @inferred simplify(expr6)
+        @test result6 isa ScalarOne
+        @test eltype(result6) === Bool
+
+        # ScalarSym \ same ScalarSym: x \ x = 1
+        expr7 = x \ x
+        result7 = @inferred simplify(expr7)
+        @test result7 isa ScalarOne
+        @test eltype(result7) === Bool
+
+        # ScalarSym \ different ScalarSym: x \ y = (x \ y) (no simplification)
+        y = ScalarSym{:y}()
+        expr8 = x \ y
+        result8 = @inferred simplify(expr8)
+        @test result8 isa ScalarCall
+        @test result8.fn === (\)
+    end
+
 end
