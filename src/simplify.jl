@@ -69,7 +69,7 @@ _simplify_mul((a, b)::Tuple{AbstractScalar, ScalarOne}) =
 _simplify_mul((a, b)::Tuple{ScalarOne, AbstractScalar}) =
     Base.promote_op(*, eltype(a), eltype(b)) === eltype(b) ? b : a * b
 _simplify_mul((a, b)::Tuple{ScalarOne, ScalarOne}) =
-    ScalarOne(Base.promote_op(*, eltype(a), eltype(b)))
+    ScalarOne{Base.promote_op(*, eltype(a), eltype(b))}()
 
 _simplify_mul((a, b)::Tuple{ScalarConst, ScalarConst}) =
     ScalarConst(a.val * b.val)
@@ -92,11 +92,11 @@ _simplify_rdiv((a, b)::Tuple{ScalarZero, ScalarOne}) =
     ScalarZero(Base.promote_op(/, eltype(a), eltype(b)))
 
 _simplify_rdiv(::NTuple{2, T}) where {T <: ScalarSym} =
-    ScalarOne(Base.promote_op(/, eltype(T), eltype(T)))
+    ScalarOne{Base.promote_op(/, eltype(T), eltype(T))}()
 _simplify_rdiv((a, b)::Tuple{ScalarConst, ScalarConst}) =
     ScalarConst(a.val / b.val)
 _simplify_rdiv((a, b)::Tuple{ScalarOne, ScalarOne}) =
-    ScalarOne(Base.promote_op(/, eltype(a), eltype(b)))
+    ScalarOne{Base.promote_op(/, eltype(a), eltype(b))}()
 
 # left-division-based identities
 _simplify_call(::typeof(\), args) = _simplify_ldiv(args)
@@ -112,10 +112,10 @@ _simplify_ldiv((a, b)::Tuple{ScalarOne, ScalarZero}) =
     ScalarZero(Base.promote_op(\, eltype(a), eltype(b)))
 
 _simplify_ldiv(::NTuple{2, T}) where {T <: ScalarSym} =
-    ScalarOne(Base.promote_op(\, eltype(T), eltype(T)))
+    ScalarOne{Base.promote_op(\, eltype(T), eltype(T))}()
 _simplify_ldiv((a, b)::Tuple{ScalarConst, ScalarConst}) =
     ScalarConst(a.val \ b.val)
 _simplify_ldiv((a, b)::Tuple{ScalarOne, ScalarOne}) =
-    ScalarOne(Base.promote_op(\, eltype(a), eltype(b)))
+ScalarOne{Base.promote_op(\, eltype(a), eltype(b))}()
 
 # ScalarRef

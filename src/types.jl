@@ -83,22 +83,31 @@ ScalarZero(::T) where {T <: AbstractScalar} = ScalarZero(T)
 
 """
     ScalarOne{T}()
+    ScalarOne(val) / ScalarOne(::Type)
 
 Type-level multiplicative identity/structural one for [`AbstractScalar`](@ref).
-Materializes to `one(T)`; requires `T` to be a *square scalar* — a type with
-`one(T)` defined (`Number`, square `SMatrix{N,N,F}`, ...). Construction rejects
-`T` lacking `one(T)` (e.g. `SVector`, non-square `SMatrix`).
 
-Lets the scalar `simplify` rules collapse multiplicative identities by
-dispatch — structurally, with no `.val` inspection — mirroring how `ScalarZero`
+**Inner constructor** `ScalarOne{T}()`: `T` must be Bool-shaped (Bool for
+scalars, SMatrix{N,N,Bool,N²} for arrays). Materializes to `one(T)` at the
+actual element type level.
+
+**Outer constructor** `ScalarOne(val)` or `ScalarOne(::Type)`: accepts the
+operand's element type (e.g., Float64 or SVector{3,Float64}), promotes to unity
+space via `_unity_space`, converts to Bool shape via `_to_bool_shape`, and
+calls the inner constructor. For example, `ScalarOne(SVector{2, Float64})` →
+`ScalarOne{SMatrix{2,2,Bool,4}}()`.
+
+Lets the scalar `simplify` rules collapse multiplicative identities by dispatch
+— structurally, with no `.val` inspection — mirroring how `ScalarZero`
 collapses additive identities.
 """
 struct ScalarOne{T} <: AbstractScalar{T}
     function ScalarOne{T}() where {T}
-        _assert_bool_shape(:ScalarOne, T)
         applicable(one, T) || throw(ArgumentError(
             "ScalarOne{T} requires `one(T)` to be defined (a square-scalar shape); got T=$T"))
-        new{T}()
+        S = _to_bool_shape(T)
+        _assert_concrete(:ScalarOne, S)
+        new{S}()
     end
 end
 
