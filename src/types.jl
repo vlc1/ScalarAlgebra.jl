@@ -162,8 +162,6 @@ for op in (:+, :-, :*, :/, :\, :^, :min, :max)
     @eval Base.$op(a, b::AbstractScalar) = ScalarCall($op, (asscalar(a), b))
 end
 
-const IntLikeScalar = Union{AbstractScalar{Int}, AbstractScalar{Colon}}
-
 """
     ScalarRef{A, I, T}(arr, indices)
 
@@ -172,33 +170,25 @@ Index node: represents `arr[indices...]` symbolically, mirroring Julia's
 `indices` is a tuple of integer-valued scalars. The result element type `T`
 is the element type of the array type carried by `arr`.
 """
-struct ScalarRef{
-        A <: AbstractScalar{<:AbstractArray},
-        I <: Tuple{Vararg{IntLikeScalar}},
-        T} <: AbstractScalar{T}
+struct ScalarRef{A <: AbstractScalar{<:AbstractArray}, I, T} <: AbstractScalar{T}
     arr::A
     indices::I
 
-    ScalarRef{A, I, T}(arr::A, indices::I) where {
-            A <: AbstractScalar{<:AbstractArray},
-            I <: Tuple{Vararg{IntLikeScalar}},
-            T} = new{A, I, T}(arr, indices)
+    function ScalarRef{A, I, T}(arr::A, indices::I) where {A <: AbstractScalar{<:AbstractArray}, I, T}
+        _assert_concrete(:ScalarRef, T)
+        new{A, I, T}(arr, indices)
+    end
 end
 
-function ScalarRef(arr::A, indices::I) where {
-        A <: AbstractScalar{<:AbstractArray},
-        I <: Tuple{Vararg{IntLikeScalar}}}
-    T = eltype(eltype(A))
+function ScalarRef(arr::A, indices::I) where {A <: AbstractScalar{<:AbstractArray}, I <: Tuple}
+    T = Base.promote_op(getindex, eltype(A), map(eltype, indices)...)
     ScalarRef{A, I, T}(arr, indices)
 end
 
-# indexing overloads
-const IntLike = Union{IntLikeScalar, Int, Colon}
-
 # IndexLinear: flat integer into any N-D array eltype.
-Base.getindex(arr::AbstractScalar{<:AbstractArray}, i::IntLike) =
+Base.getindex(arr::AbstractScalar{<: AbstractArray}, i) =
     ScalarRef(arr, (asscalar(i),))
 
 # IndexCartesian: exactly N integer indices for an N-D array eltype.
-Base.getindex(arr::AbstractScalar{<:AbstractArray{T,N}}, I::Vararg{IntLike,N}) where {T,N} =
+Base.getindex(arr::AbstractScalar{<:AbstractArray{T, N}}, I::Vararg{Any, N}) where {T, N} =
     ScalarRef(arr, map(asscalar, I))

@@ -28,11 +28,11 @@ _colon_pad(::Type{<:AbstractArray{T, N}}) where {T, N} = ntuple(Returns(ScalarCo
 _jacobian_type(S::Type{<: Number}, T::Type{<: Number}) = promote_type(S, T)
 
 # no proper row vector
-#_jacobian_type(S::Type{<: Number}, ::Type{SVector{N, T}}) where {N, T} =
-#    similar_type(SMatrix{1, N, T}, promote_type(S, T))
-#
-#_jacobian_type(::Type{SVector{M, S}}, T::Type{<: Number},) where {M, S} =
-#    similar_type(SVector{M, S}, promote_type(S, T))
+_jacobian_type(S::Type{<: Number}, ::Type{SVector{N, T}}) where {N, T} =
+    similar_type(SMatrix{1, N, T}, promote_type(S, T))
+
+_jacobian_type(::Type{SVector{M, S}}, T::Type{<: Number},) where {M, S} =
+    similar_type(SVector{M, S}, promote_type(S, T))
 
 # `similar_type` fills in the trailing `L = M * N`, giving the concrete form
 # `SMatrix{M, N, F, M * N}` that `_assert_concrete` accepts.
@@ -47,9 +47,8 @@ _jacobian_type(S::Type, T::Type) = throw(ArgumentError(
 
 # Linear-map space of a value-space type `T` — the type whose `one(·)` is the
 # multiplicative identity for things in `T`'s algebra. Delegates to
-# `_jacobian_type(T, T)` (defined in `differentiate.jl`, resolved at call time):
-# Number stays itself; SVector{N, F} maps to the canonical square SMatrix{N, N, F};
-# same-type T returns T (e.g. SMatrix is its own identity space).
+# `_jacobian_type(T, T)`: Number stays itself; SVector{N,F} maps to the
+# canonical square SMatrix{N,N,F}; same-type T returns T.
 _unity_space(::Type{T}) where {T} = _jacobian_type(T, T)
 
 #_value_space(::Type{<: Number}) = Bool

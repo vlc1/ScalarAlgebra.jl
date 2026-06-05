@@ -493,6 +493,19 @@ using ScalarAlgebra
         @test d_ref_zero.arr isa ScalarZero
         @test d_ref_zero.indices[1] === i
         @test d_ref_zero.indices[2] isa ScalarConst{Colon}
+
+        # cross-shape _jacobian_type: scalar out, vector in → 1×N row
+        @test ScalarAlgebra._jacobian_type(Float64, SVector{2,Float64}) === SMatrix{1,2,Float64,2}
+        # cross-shape _jacobian_type: vector out, scalar in → M-column
+        @test ScalarAlgebra._jacobian_type(SVector{2,Float64}, Float64) === SVector{2,Float64}
+
+        # d(x)/dv: scalar sym w.r.t. vector sym → ScalarZero of row shape
+        d_sv = @inferred differentiate(x, v)
+        @test d_sv isa ScalarZero{SMatrix{1,2,Bool,2}}
+
+        # d(v)/dx: vector sym w.r.t. scalar sym → ScalarZero of column shape
+        d_vs = @inferred differentiate(v, x)
+        @test d_vs isa ScalarZero{SVector{2,Bool}}
     end
 
 end
