@@ -423,6 +423,17 @@ using ScalarAlgebra
         r_o4 = @inferred simplify(o_sv[ScalarConst(2), ScalarConst(1)])
         @test r_o4 isa ScalarConst{Bool} && r_o4.val === false
         @test_throws BoundsError simplify(o_sv[ScalarConst(3), ScalarConst(1)])
+
+        # non-pointwise op (* ) does not distribute — result is valid ScalarRef
+        # previously threw MethodError: getindex(2, Colon(), 1)
+        d = simplify(differentiate(2u, u[1]))
+        @test d isa AbstractScalar
+        @test eltype(d) === SVector{2, Int64}
+
+        # post-distribution constant fold: (2u)[1] w.r.t. u[1] = 2
+        d2 = simplify(differentiate((2u)[1], u[1]))
+        @test d2 isa ScalarConst{Int64}
+        @test d2.val === 2
     end
 
 @testset "materialize" begin
@@ -506,6 +517,53 @@ using ScalarAlgebra
         # d(v)/dx: vector sym w.r.t. scalar sym → ScalarZero of column shape
         d_vs = @inferred differentiate(v, x)
         @test d_vs isa ScalarZero{SVector{2,Bool}}
+
+        # scalar literal × array sym: d(2v)/dv = 2*I  (previously threw)
+        d_lit = simplify(differentiate(2v, v))
+        @test d_lit isa ScalarCall{typeof(*)}
+        @test eltype(d_lit) === SMatrix{2,2,Int64,4}
+
+        # array × scalar literal: d(v*3.0)/dv = I*3.0 (must not regress)
+        d_arr_lit = simplify(differentiate(v * ScalarConst(3.0), v))
+        @test d_arr_lit isa AbstractScalar
+
+        # scalar literal \ array sym: d(2\v)/dv (previously threw)
+        d_ldiv_arr = simplify(differentiate(ScalarConst(2) \ v, v))
+        @test d_ldiv_arr isa AbstractScalar
+        @test eltype(d_ldiv_arr) === SMatrix{2,2,Float64,4}
+
+        # scalar \ scalar regression
+        d_ldiv_s = @inferred simplify(differentiate(ScalarConst(2.0) \ x, x))
+        @test d_ldiv_s isa AbstractScalar
+        @test eltype(d_ldiv_s) === Float64
+
+        # d(x)/d(v[i]): scalar expr w.r.t. ScalarRef — no colon pad (scalar output)
+        d_wrt_ref_s = @inferred differentiate(x, v[i])
+        @test d_wrt_ref_s isa ScalarRef
+        @test d_wrt_ref_s.arr isa ScalarZero
+        @test d_wrt_ref_s.indices === (i,)
+        @test eltype(d_wrt_ref_s) === Bool
+
+        # d(v)/d(v[i]): vector expr w.r.t. ScalarRef — Colon prepended (vector output)
+        d_wrt_ref_v = @inferred differentiate(v, v[i])
+        @test d_wrt_ref_v isa ScalarRef
+        @test d_wrt_ref_v.arr isa ScalarOne
+        @test d_wrt_ref_v.indices[1] isa ScalarConst{Colon}
+        @test d_wrt_ref_v.indices[2] === i
+        @test eltype(d_wrt_ref_v) === SVector{2,Bool}
+
+        # d(v[1])/d(v): scalar ref w.r.t. vector sym — constant index wrapped to preserve row shape
+        d_scalar_ref_wrt_v = @inferred differentiate(v[ScalarConst(1)], v)
+        @test d_scalar_ref_wrt_v isa ScalarRef
+        @test eltype(d_scalar_ref_wrt_v) === SMatrix{1,2,Bool,2}
+
+        # d(2v[1])/d(v[2]): exercises the fixed product rule path
+        d_2v1_wrt_v2 = @inferred differentiate(2v[ScalarConst(1)], v[ScalarConst(2)])
+        @test d_2v1_wrt_v2 isa AbstractScalar
+        @test eltype(d_2v1_wrt_v2) === Float64
+
+        # simplify(d(2v[1])/d(v[2])) = 0
+        @test simplify(d_2v1_wrt_v2) == ScalarConst(0)
     end
 
 end
