@@ -43,8 +43,10 @@ end
     ScalarConst{T}(val) / ScalarConst(val)
 
 Literal scalar leaf carrying a value `val::T` as-is. Materializes to `val`.
-`T` is any concrete type — `Number`, `SArray`, etc. — making `ScalarConst` the
-right carrier for boundary literals such as `x + 1`, `v + SVector(1)`.
+`T` is any concrete type — `Number`, `SArray`, `Colon`, etc. — making
+`ScalarConst` the right carrier for boundary literals such as `x + 1`, `v +
+SVector(1)`, and slice indices such as `ScalarConst(Colon())` (`:`) in
+`ScalarRef` index tuples.
 """
 struct ScalarConst{T} <: AbstractScalar{T}
     val::T
@@ -160,6 +162,8 @@ for op in (:+, :-, :*, :/, :\, :^, :min, :max)
     @eval Base.$op(a, b::AbstractScalar) = ScalarCall($op, (asscalar(a), b))
 end
 
+const IntLikeScalar = Union{AbstractScalar{Int}, AbstractScalar{Colon}}
+
 """
     ScalarRef{A, I, T}(arr, indices)
 
@@ -170,26 +174,26 @@ is the element type of the array type carried by `arr`.
 """
 struct ScalarRef{
         A <: AbstractScalar{<:AbstractArray},
-        I <: Tuple{Vararg{AbstractScalar{Int}}},
+        I <: Tuple{Vararg{IntLikeScalar}},
         T} <: AbstractScalar{T}
     arr::A
     indices::I
 
     ScalarRef{A, I, T}(arr::A, indices::I) where {
             A <: AbstractScalar{<:AbstractArray},
-            I <: Tuple{Vararg{AbstractScalar{Int}}},
+            I <: Tuple{Vararg{IntLikeScalar}},
             T} = new{A, I, T}(arr, indices)
 end
 
 function ScalarRef(arr::A, indices::I) where {
         A <: AbstractScalar{<:AbstractArray},
-        I <: Tuple{Vararg{AbstractScalar{Int}}}}
+        I <: Tuple{Vararg{IntLikeScalar}}}
     T = eltype(eltype(A))
     ScalarRef{A, I, T}(arr, indices)
 end
 
 # indexing overloads
-const IntLike = Union{AbstractScalar{Int}, Int}
+const IntLike = Union{IntLikeScalar, Int, Colon}
 
 # IndexLinear: flat integer into any N-D array eltype.
 Base.getindex(arr::AbstractScalar{<:AbstractArray}, i::IntLike) =

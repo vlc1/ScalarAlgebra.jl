@@ -9,7 +9,7 @@ simplify(sc::AbstractScalar) = sc
 
 # ScalarCall
 _simplify_args(::Tuple{}) = ()
-_simplify_args((x, xs...)::Tuple{Any, Vararg}) = simplify(x), _simplify_args(xs)...
+_simplify_args((x, xs...)::Tuple{AbstractScalar, Vararg}) = simplify(x), _simplify_args(xs)...
 
 simplify(sc::ScalarCall) = _simplify_call(sc.fn, _simplify_args(sc.args))
 

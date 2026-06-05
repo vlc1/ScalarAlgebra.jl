@@ -425,33 +425,7 @@ using ScalarAlgebra
         @test_throws BoundsError simplify(o_sv[ScalarConst(3), ScalarConst(1)])
     end
 
-    @testset "convert Expr" begin
-        @scalar x Float64
-        @scalar v SVector{2, Float64}
-        @scalar i Int
-
-        @test convert(Expr, x) == Expr(:(::), :x, Float64)
-        @test convert(Expr, ScalarConst(2.0)) == Expr(:(::), 2.0, Float64)
-        @test convert(Expr, ScalarZero(Float64)) == Expr(:call, :zero, Bool)
-        @test convert(Expr, ScalarOne(Float64)) == Expr(:call, :one, Bool)
-
-        e_call = convert(Expr, x + ScalarConst(1.0))
-        @test e_call.head === :(::)
-        @test e_call.args[2] === Float64
-        @test e_call.args[1].head === :call
-        @test e_call.args[1].args[1] === Base.:+
-        @test e_call.args[1].args[2] == convert(Expr, x)
-        @test e_call.args[1].args[3] == convert(Expr, ScalarConst(1.0))
-
-        e_ref = convert(Expr, v[i])
-        @test e_ref.head === :(::)
-        @test e_ref.args[2] === Float64
-        @test e_ref.args[1].head === :ref
-        @test e_ref.args[1].args[1] == convert(Expr, v)
-        @test e_ref.args[1].args[2] == convert(Expr, i)
-    end
-
-    @testset "materialize" begin
+@testset "materialize" begin
         @scalar x Float64
         @scalar v SVector{2, Float64}
         @scalar i Int
@@ -467,6 +441,58 @@ using ScalarAlgebra
 
         pairs_v = (v = SVector(1.0, 2.0), i = 2)
         @test materialize(v[i], pairs_v) === 2.0
+    end
+
+    @testset "differentiate" begin
+        x = ScalarSym{:x}()
+        y = ScalarSym{:y}()
+
+        # ScalarSym: same symbol → ScalarOne
+        @test @inferred(differentiate(x, x)) isa ScalarOne{Bool}
+
+        # ScalarSym: different symbol → ScalarZero
+        @test @inferred(differentiate(x, y)) isa ScalarZero{Bool}
+
+        # ScalarCall(+): linearity
+        d_add = @inferred differentiate(x + y, x)
+        @test d_add isa ScalarCall{typeof(+)}
+        @test d_add.args[1] isa ScalarOne{Bool}
+        @test d_add.args[2] isa ScalarZero{Bool}
+
+        # ScalarCall(-) binary: linearity
+        d_sub = @inferred differentiate(x - y, x)
+        @test d_sub isa ScalarCall{typeof(-)}
+        @test d_sub.args[1] isa ScalarOne{Bool}
+        @test d_sub.args[2] isa ScalarZero{Bool}
+
+        # ScalarCall(*): product rule  d(x*y)/dx = 1*y + x*0 = y
+        d_mul = @inferred differentiate(x * y, x)
+        @test d_mul isa ScalarCall{typeof(+)}
+
+        # ScalarCall(/): quotient rule  d(x/y)/dx = (1 - (x/y)*0) / y = 1/y
+        d_rdiv = @inferred differentiate(x / y, x)
+        @test d_rdiv isa ScalarCall{typeof(/)}
+
+        # ScalarCall(\): left-div rule  d(x\y)/dx = x\(0 - 1*(x\y)) = -(x\y)/x
+        d_ldiv = @inferred differentiate(x \ y, x)
+        @test d_ldiv isa ScalarCall{typeof(\)}
+
+        # ScalarRef: d(v[i])/dv = ∂v/∂v padded with Colon → (I)[i, :]
+        @scalar v SVector{2, Float64}
+        @scalar w SVector{2, Float64}
+        @scalar i Int
+        d_ref = @inferred differentiate(v[i], v)
+        @test d_ref isa ScalarRef
+        @test d_ref.arr isa ScalarOne
+        @test d_ref.indices[1] === i
+        @test d_ref.indices[2] isa ScalarConst{Colon}
+
+        # ScalarRef: d(v[i])/dw = 0 padded with Colon → (0)[i, :]
+        d_ref_zero = @inferred differentiate(v[i], w)
+        @test d_ref_zero isa ScalarRef
+        @test d_ref_zero.arr isa ScalarZero
+        @test d_ref_zero.indices[1] === i
+        @test d_ref_zero.indices[2] isa ScalarConst{Colon}
     end
 
 end

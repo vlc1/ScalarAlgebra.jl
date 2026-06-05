@@ -21,8 +21,18 @@ _to_bool_shape(::Type{T}) where {T <: StaticArray} = similar_type(T, Bool)
             "got T=$(T). Use e.g. Null(x) or Null(typeof(x)) to construct correctly."))
 end
 
+_colon_pad(::Type{<:Number}) = ()
+_colon_pad(::Type{<:AbstractArray{T, N}}) where {T, N} = ntuple(Returns(ScalarConst(Colon())), N)
+
 # Jacobian eltype `J = Jac(S, T)` (`S` is output type, `T` is input type).
 _jacobian_type(S::Type{<: Number}, T::Type{<: Number}) = promote_type(S, T)
+
+# no proper row vector
+#_jacobian_type(S::Type{<: Number}, ::Type{SVector{N, T}}) where {N, T} =
+#    similar_type(SMatrix{1, N, T}, promote_type(S, T))
+#
+#_jacobian_type(::Type{SVector{M, S}}, T::Type{<: Number},) where {M, S} =
+#    similar_type(SVector{M, S}, promote_type(S, T))
 
 # `similar_type` fills in the trailing `L = M * N`, giving the concrete form
 # `SMatrix{M, N, F, M * N}` that `_assert_concrete` accepts.
