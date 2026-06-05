@@ -368,4 +368,105 @@ using ScalarAlgebra
         @test result8.fn === (\)
     end
 
+    @testset "simplify ScalarRef" begin
+        @scalar i Int
+        @scalar u SVector{2, Float64}
+        @scalar v SVector{2, Float64}
+        @scalar w SVector{2, Float64}
+
+        # (u + v)[i] → u[i] + v[i]
+        r1 = @inferred simplify((u + v)[i])
+        @test r1 isa ScalarCall{typeof(+)}
+        @test r1.args[1] isa ScalarRef && r1.args[1].arr === u
+        @test r1.args[2] isa ScalarRef && r1.args[2].arr === v
+
+        # (u - v)[i] → u[i] - v[i]
+        r2 = @inferred simplify((u - v)[i])
+        @test r2 isa ScalarCall{typeof(-)}
+        @test r2.args[1].arr === u && r2.args[2].arr === v
+
+        # (-u)[i] → -(u[i])
+        r3 = @inferred simplify((-u)[i])
+        @test r3 isa ScalarCall{typeof(-)}
+        @test only(r3.args).arr === u
+
+        # ((u + v) + w)[i] → (u[i] + v[i]) + w[i]  (tests recursion)
+        r4 = @inferred simplify(((u + v) + w)[i])
+        @test r4 isa ScalarCall{typeof(+)}
+        @test r4.args[1] isa ScalarCall{typeof(+)}
+        @test r4.args[2] isa ScalarRef && r4.args[2].arr === w
+
+        # ScalarZero[i] — no structural rule, left as ScalarRef
+        z = ScalarZero(SVector{2, Float64})
+        r5 = @inferred simplify(z[i])
+        @test r5 isa ScalarRef
+        @test r5.arr === z
+
+        # leaf[i] unchanged (fallback)
+        r6 = @inferred simplify(u[i])
+        @test r6 isa ScalarRef && r6.arr === u
+
+        # ScalarZero[ScalarConst] → ScalarZero{Bool}
+        z_sv = ScalarZero(SVector{2, Float64})
+        @test (@inferred simplify(z_sv[ScalarConst(1)])) isa ScalarZero{Bool}
+        @test (@inferred simplify(z_sv[ScalarConst(2)])) isa ScalarZero{Bool}
+        @test_throws BoundsError simplify(z_sv[ScalarConst(3)])
+
+        # ScalarOne[ScalarConst, ScalarConst] → ScalarConst{Bool} (type-stable)
+        o_sv = ScalarOne(SVector{2, Float64})
+        r_o1 = @inferred simplify(o_sv[ScalarConst(1), ScalarConst(1)])
+        @test r_o1 isa ScalarConst{Bool} && r_o1.val === true
+        r_o2 = @inferred simplify(o_sv[ScalarConst(2), ScalarConst(2)])
+        @test r_o2 isa ScalarConst{Bool} && r_o2.val === true
+        r_o3 = @inferred simplify(o_sv[ScalarConst(1), ScalarConst(2)])
+        @test r_o3 isa ScalarConst{Bool} && r_o3.val === false
+        r_o4 = @inferred simplify(o_sv[ScalarConst(2), ScalarConst(1)])
+        @test r_o4 isa ScalarConst{Bool} && r_o4.val === false
+        @test_throws BoundsError simplify(o_sv[ScalarConst(3), ScalarConst(1)])
+    end
+
+    @testset "convert Expr" begin
+        @scalar x Float64
+        @scalar v SVector{2, Float64}
+        @scalar i Int
+
+        @test convert(Expr, x) == Expr(:(::), :x, Float64)
+        @test convert(Expr, ScalarConst(2.0)) == Expr(:(::), 2.0, Float64)
+        @test convert(Expr, ScalarZero(Float64)) == Expr(:call, :zero, Bool)
+        @test convert(Expr, ScalarOne(Float64)) == Expr(:call, :one, Bool)
+
+        e_call = convert(Expr, x + ScalarConst(1.0))
+        @test e_call.head === :(::)
+        @test e_call.args[2] === Float64
+        @test e_call.args[1].head === :call
+        @test e_call.args[1].args[1] === Base.:+
+        @test e_call.args[1].args[2] == convert(Expr, x)
+        @test e_call.args[1].args[3] == convert(Expr, ScalarConst(1.0))
+
+        e_ref = convert(Expr, v[i])
+        @test e_ref.head === :(::)
+        @test e_ref.args[2] === Float64
+        @test e_ref.args[1].head === :ref
+        @test e_ref.args[1].args[1] == convert(Expr, v)
+        @test e_ref.args[1].args[2] == convert(Expr, i)
+    end
+
+    @testset "materialize" begin
+        @scalar x Float64
+        @scalar v SVector{2, Float64}
+        @scalar i Int
+
+        @test materialize(x, (x = 3.0,)) === 3.0
+        @test materialize(ScalarConst(2.0), NamedTuple()) === 2.0
+        @test materialize(ScalarZero(Float64), NamedTuple()) === false
+        @test materialize(ScalarOne(Float64), NamedTuple()) === true
+
+        pairs = (x = 2.0,)
+        @test materialize(x + ScalarConst(1.0), pairs) === 3.0
+        @test materialize(-x, pairs) === -2.0
+
+        pairs_v = (v = SVector(1.0, 2.0), i = 2)
+        @test materialize(v[i], pairs_v) === 2.0
+    end
+
 end

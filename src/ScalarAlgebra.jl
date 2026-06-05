@@ -11,11 +11,13 @@ export AbstractScalar,
        ScalarRef,
        @scalar,
        asscalar,
-       simplify
+       simplify,
+       materialize
 
 include("utils.jl")
 include("types.jl")
 include("simplify.jl")
+include("materialize.jl")
 include("display.jl")
 
 end # module

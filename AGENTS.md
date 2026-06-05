@@ -29,7 +29,15 @@ post-order via `simplify(::ScalarCall)` → `_simplify_args` (recurse children) 
 elements (add/sub/mul/div), zero-annihilation, constant folding (ScalarConst
 and ScalarOne), double negation, and same-symbol cancellation (ScalarSym /
 ScalarSym = 1). Shape guards (`Base.promote_op`) prevent identity collapse when
-the result type would change.
+the result type would change. `ScalarRef` simplification (`_simplify_ref`)
+distributes indexing down through `ScalarCall` nodes and folds constant indices
+into `ScalarConst`, `ScalarZero`, and `ScalarOne` leaves.
+
+**Type stability**: All `simplify` rules must return a single concrete type —
+never `Union{A, B}`. Use `@inferred` in every new test. When a rule would
+naturally return different node types based on a runtime value (e.g. diagonal
+vs off-diagonal in `ScalarOne`), return a value-carrying node (`ScalarConst`)
+instead of a structurally-typed node to preserve type stability.
 
 ## MCP Servers
 

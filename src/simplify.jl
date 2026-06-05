@@ -119,3 +119,15 @@ _simplify_ldiv((a, b)::Tuple{ScalarOne, ScalarOne}) =
 ScalarOne{Base.promote_op(\, eltype(a), eltype(b))}()
 
 # ScalarRef
+simplify(sc::ScalarRef) = _simplify_ref(simplify(sc.arr), _simplify_args(sc.indices))
+
+_simplify_ref(arr::AbstractScalar, indices) = ScalarRef(arr, indices)
+
+_simplify_ref(call::ScalarCall, indices) =
+    ScalarCall(call.fn, map(x -> _simplify_ref(x, indices), call.args))
+_simplify_ref(a::ScalarConst, indices::Tuple{Vararg{ScalarConst}}) =
+    ScalarConst(a.val[getfield.(indices, :val)...])
+_simplify_ref(::ScalarZero{T}, indices::Tuple{Vararg{ScalarConst}}) where {T} =
+    (checkbounds(zero(T), getfield.(indices, :val)...); ScalarZero{eltype(T)}())
+_simplify_ref(::ScalarOne{T}, indices::Tuple{Vararg{ScalarConst}}) where {T} =
+    ScalarConst(one(T)[getfield.(indices, :val)...])
