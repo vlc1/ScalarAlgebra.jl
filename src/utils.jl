@@ -54,3 +54,16 @@ _unity_space(::Type{T}) where {T} = _jacobian_type(T, T)
 #_value_space(::Type{<: Number}) = Bool
 #_value_space(::Type{<: SMatrix{N, N, T}}) where {N, T} =
 #    similar_type(SVector{N, T}, Bool)
+
+# Resolve the fully-specified StaticArray type from a (possibly bare/partial) SA type
+# and a tuple of AbstractScalar args whose eltypes determine T.
+function _scalar_sa_type(::Type{SA}, args::Tuple) where {SA <: StaticArray}
+    T = promote_type(map(eltype, args)...)
+    similar_type(SA, T)
+end
+
+# Bare SVector (no size parameter): infer N from arg count.
+function _scalar_sa_type(::Type{<:SVector}, args::Tuple)
+    T = promote_type(map(eltype, args)...)
+    SVector{length(args), T}
+end

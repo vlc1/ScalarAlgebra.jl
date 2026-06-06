@@ -142,6 +142,12 @@ function ScalarCall(fn::F, args::A) where {F, A<:Tuple{Vararg{AbstractScalar}}}
     ScalarCall{F, A, T}(fn, args)
 end
 
+# Constructor-typed fn: result type is SA itself — no promote_op needed.
+function ScalarCall(fn::Type{SA}, args::A) where {
+        SA <: StaticArray, A <: Tuple{Vararg{AbstractScalar}}}
+    ScalarCall{Type{SA}, A, SA}(fn, args)
+end
+
 # Promote a non-AbstractScalar value to a scalar leaf at the operator boundary.
 # Wraps as `ScalarConst` — a literal carrier, no `one(·)` multiplication.
 asscalar(sc::AbstractScalar) = sc
@@ -160,6 +166,15 @@ for op in (:+, :-, :*, :/, :\, :^, :min, :max)
     @eval Base.$op(a::AbstractScalar, b::AbstractScalar) = ScalarCall($op, (a, b))
     @eval Base.$op(a::AbstractScalar, b) = ScalarCall($op, (a, asscalar(b)))
     @eval Base.$op(a, b::AbstractScalar) = ScalarCall($op, (asscalar(a), b))
+end
+
+# Intercept StaticArray constructors when the first arg is an AbstractScalar.
+# Remaining args are lifted via asscalar so mixed calls (e.g. SVector(u, 1.0))
+# are handled transparently. Gap: non-scalar-first mixed calls (SVector(1.0, u))
+# fall through to StaticArrays; use ScalarConst explicitly in that case.
+function (::Type{SA})(x::AbstractScalar, xs...) where {SA <: StaticArray}
+    args = (x, map(asscalar, xs)...)
+    ScalarCall(_scalar_sa_type(SA, args), args)
 end
 
 """

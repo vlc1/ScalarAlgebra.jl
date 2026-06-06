@@ -566,4 +566,70 @@ using ScalarAlgebra
         @test simplify(d_2v1_wrt_v2) == ScalarConst(0)
     end
 
+    @testset "StaticArray constructors" begin
+        @scalar u Float64
+        @scalar v Float32
+
+        # Bare SVector: N inferred from arg count, T from eltype
+        sv = @inferred SVector(u, u)
+        @test sv isa ScalarCall
+        @test eltype(sv) === SVector{2, Float64}
+
+        # Mixed: concrete arg lifted via asscalar
+        sv2 = @inferred SVector(u, 1.0)
+        @test sv2 isa ScalarCall
+        @test eltype(sv2) === SVector{2, Float64}
+
+        # Mixed eltypes: promotes Float32 + Float64 → Float64
+        sv3 = @inferred SVector(u, v)
+        @test sv3 isa ScalarCall
+        @test eltype(sv3) === SVector{2, Float64}
+
+        # Partially-specified type: SVector{3}
+        sv4 = @inferred SVector{3}(u, u, u)
+        @test sv4 isa ScalarCall
+        @test eltype(sv4) === SVector{3, Float64}
+
+        # SMatrix with explicit size params
+        sm = @inferred SMatrix{2,2}(u, u, u, u)
+        @test sm isa ScalarCall
+        @test eltype(sm) === SMatrix{2,2,Float64,4}
+
+        # materialize round-trips
+        @test materialize(sv, (u = 2.0,)) === SVector(2.0, 2.0)
+        @test materialize(sv2, (u = 3.0,)) === SVector(3.0, 1.0)
+        @test materialize(sm, (u = 1.0,)) === SMatrix{2,2}(1.0, 1.0, 1.0, 1.0)
+
+        # display
+        @test sprint(show, sv) == "SVector(u, u)"
+        @test sprint(show, sm) == "SMatrix(u, u, u, u)"
+
+        # simplify: generic fallback — passes through with simplified args
+        sv_s = @inferred simplify(sv)
+        @test sv_s isa ScalarCall
+        @test eltype(sv_s) === SVector{2, Float64}
+
+        # simplify: constant folding — all-ScalarConst args evaluate immediately
+        sv_c = @inferred simplify(SVector(ScalarConst(1.0), ScalarConst(2.0)))
+        @test sv_c === ScalarConst(SVector(1.0, 2.0))
+
+        # simplify: ScalarRef look-ahead — linear index into constructor (homogeneous)
+        elem1 = @inferred simplify(sv[1])
+        @test elem1 === u
+
+        # simplify: ScalarRef look-ahead — cartesian index into SMatrix (homogeneous)
+        sm_u = @inferred simplify(SMatrix{2,2}(u, u, u, u)[1, 2])
+        @test sm_u === u
+
+        # simplify: ScalarRef look-ahead — cartesian index, heterogeneous args
+        @scalar a Float64; @scalar b Float64; @scalar c Float64; @scalar d Float64
+        sm_elem = simplify(SMatrix{2,2}(a, b, c, d)[1, 2])
+        @test sm_elem === c   # col-major: [1,2] → linear index 3
+
+        # generic fallback also fixes exp/sin/cos/log
+        r = @inferred simplify(exp(u))
+        @test r isa ScalarCall{typeof(exp)}
+        @test r.fn === exp
+    end
+
 end

@@ -118,6 +118,14 @@ _simplify_ldiv((a, b)::Tuple{ScalarConst, ScalarConst}) =
 _simplify_ldiv((a, b)::Tuple{ScalarOne, ScalarOne}) =
 ScalarOne{Base.promote_op(\, eltype(a), eltype(b))}()
 
+# Constant folding: all-const args to a StaticArray constructor → evaluate immediately.
+_simplify_call(fn::Type{SA}, args::Tuple{Vararg{ScalarConst}}) where {SA <: StaticArray} =
+    ScalarConst(fn(map(a -> a.val, args)...))
+
+# Generic fallback: reconstruct with already-simplified args; covers exp, sin, cos,
+# StaticArray constructors, and any other callable not handled above.
+_simplify_call(fn, args) = ScalarCall(fn, args)
+
 # ScalarRef
 simplify(sc::ScalarRef) = _simplify_ref(simplify(sc.arr), _simplify_args(sc.indices))
 
@@ -144,6 +152,16 @@ _simplify_ref_call(::typeof(/), args, indices) =
     _simplify_ref_rdiv(args, indices)
 _simplify_ref_call(::typeof(\), args, indices) =
     _simplify_ref_ldiv(args, indices)
+# Index into a StaticArray constructor with constant integer indices: extract the
+# corresponding arg. Uses LinearIndices for cartesian→linear (column-major) conversion.
+# Type-unstable. Possible fix: wrap index in Static's `static` to preserve type info.
+#function _simplify_ref_call(
+#    ::Type{SA}, args, indices::Tuple{Vararg{ScalarConst{<:Integer}}}
+#) where {SA <: StaticArray}
+#    linear = LinearIndices(Tuple(Size(SA)))[map(a -> a.val, indices)...]
+#    args[linear]
+#end
+
 _simplify_ref_call(fn, args, indices) = ScalarRef(ScalarCall(fn, args), indices)
 
 _simplify_ref_mul((a, b)::Tuple{AbstractScalar{<: Number}, AbstractScalar}, indices) =

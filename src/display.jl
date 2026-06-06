@@ -13,8 +13,13 @@ _scalar_show(io::IO, s::ScalarConst) = show(io, s.val)
 _scalar_show(io::IO, ::ScalarZero) = print(io, 'O')
 _scalar_show(io::IO, ::ScalarOne) = print(io, 'U')
 
+_fn_name(fn) = nameof(fn)
+_fn_name(::Type{<:SVector})      = :SVector
+_fn_name(::Type{<:SMatrix})      = :SMatrix
+_fn_name(::Type{<:StaticArray})  = :SArray
+
 function _scalar_show(io::IO, s::ScalarCall)
-    op, args = nameof(s.fn), s.args
+    op, args = _fn_name(s.fn), s.args
 
     if length(args) == 2 && op in _SCALAR_INFIX
         print(io, '(')
