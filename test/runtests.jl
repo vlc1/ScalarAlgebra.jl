@@ -1,5 +1,6 @@
 using Test
 using StaticArrays
+using Static
 using ScalarAlgebra
 
 @testset "ScalarAlgebra.jl" begin
@@ -457,113 +458,145 @@ using ScalarAlgebra
     @testset "differentiate" begin
         x = ScalarSym{:x}()
         y = ScalarSym{:y}()
-
-        # ScalarSym: same symbol → ScalarOne
-        @test @inferred(differentiate(x, x)) isa ScalarOne{Bool}
-
-        # ScalarSym: different symbol → ScalarZero
-        @test @inferred(differentiate(x, y)) isa ScalarZero{Bool}
-
-        # ScalarCall(+): linearity
-        d_add = @inferred differentiate(x + y, x)
-        @test d_add isa ScalarCall{typeof(+)}
-        @test d_add.args[1] isa ScalarOne{Bool}
-        @test d_add.args[2] isa ScalarZero{Bool}
-
-        # ScalarCall(-) binary: linearity
-        d_sub = @inferred differentiate(x - y, x)
-        @test d_sub isa ScalarCall{typeof(-)}
-        @test d_sub.args[1] isa ScalarOne{Bool}
-        @test d_sub.args[2] isa ScalarZero{Bool}
-
-        # ScalarCall(*): product rule  d(x*y)/dx = 1*y + x*0 = y
-        d_mul = @inferred differentiate(x * y, x)
-        @test d_mul isa ScalarCall{typeof(+)}
-
-        # ScalarCall(/): quotient rule  d(x/y)/dx = (1 - (x/y)*0) / y = 1/y
-        d_rdiv = @inferred differentiate(x / y, x)
-        @test d_rdiv isa ScalarCall{typeof(/)}
-
-        # ScalarCall(\): left-div rule  d(x\y)/dx = x\(0 - 1*(x\y)) = -(x\y)/x
-        d_ldiv = @inferred differentiate(x \ y, x)
-        @test d_ldiv isa ScalarCall{typeof(\)}
-
-        # ScalarRef: d(v[i])/dv = ∂v/∂v padded with Colon → (I)[i, :]
         @scalar v SVector{2, Float64}
         @scalar w SVector{2, Float64}
         @scalar i Int
-        d_ref = @inferred differentiate(v[i], v)
-        @test d_ref isa ScalarRef
-        @test d_ref.arr isa ScalarOne
-        @test d_ref.indices[1] === i
-        @test d_ref.indices[2] isa ScalarConst{Colon}
 
-        # ScalarRef: d(v[i])/dw = 0 padded with Colon → (0)[i, :]
-        d_ref_zero = @inferred differentiate(v[i], w)
-        @test d_ref_zero isa ScalarRef
-        @test d_ref_zero.arr isa ScalarZero
-        @test d_ref_zero.indices[1] === i
-        @test d_ref_zero.indices[2] isa ScalarConst{Colon}
+        # finite-difference Jacobian (columns = directional derivatives)
+        fdj(bf, x0; h = 1e-6) = (n = length(x0);
+            hcat([(bf(x0 .+ h .* ((1:n) .== j)) .- bf(x0 .- h .* ((1:n) .== j))) ./ (2h) for j in 1:n]...))
 
-        # cross-shape _jacobian_type: scalar out, vector in → 1×N row
-        @test ScalarAlgebra._jacobian_type(Float64, SVector{2,Float64}) === SMatrix{1,2,Float64,2}
-        # cross-shape _jacobian_type: vector out, scalar in → M-column
-        @test ScalarAlgebra._jacobian_type(SVector{2,Float64}, Float64) === SVector{2,Float64}
+        # self / cross derivatives keep clean structural identity / zero nodes
+        @test @inferred(differentiate(x, x)) isa ScalarOne{Bool}
+        @test @inferred(differentiate(x, y)) isa ScalarZero{Bool}
+        @test @inferred(differentiate(v, v)) isa ScalarOne{SMatrix{2,2,Bool,4}}
+        @test @inferred(differentiate(v, x)) isa ScalarZero{SVector{2,Bool}}
 
-        # d(x)/dv: scalar sym w.r.t. vector sym → ScalarZero of row shape
+        # d(x)/dv: scalar out, vector in → 1×2 zero row
         d_sv = @inferred differentiate(x, v)
-        @test d_sv isa ScalarZero{SMatrix{1,2,Bool,2}}
+        @test eltype(d_sv) === SMatrix{1,2,Bool,2}
+        @test materialize(simplify(d_sv), NamedTuple()) == SMatrix{1,2,Bool}(false, false)
 
-        # d(v)/dx: vector sym w.r.t. scalar sym → ScalarZero of column shape
-        d_vs = @inferred differentiate(v, x)
-        @test d_vs isa ScalarZero{SVector{2,Bool}}
+        # scalar chain rules, via the JVP core (vs finite differences)
+        @test @inferred(differentiate(x + y, x)) isa AbstractScalar
+        for (e, jl) in [(x * y, (a, b) -> b), (x / y, (a, b) -> 1 / b), (x \ y, (a, b) -> -b / a^2)]
+            @test materialize(simplify(differentiate(e, x)), (x = 2.0, y = 5.0)) ≈ jl(2.0, 5.0)
+        end
 
-        # scalar literal × array sym: d(2v)/dv = 2*I  (previously threw)
-        d_lit = simplify(differentiate(2v, v))
-        @test d_lit isa ScalarCall{typeof(*)}
-        @test eltype(d_lit) === SMatrix{2,2,Int64,4}
+        # dense Jacobians (vector input) reconstructed from JVP, vs finite differences
+        # d(x*v)/dv = x*I
+        Jxv = @inferred differentiate(x * v, v)
+        @test eltype(Jxv) === SMatrix{2,2,Float64,4}
+        @test materialize(simplify(Jxv), (x = 2.5,)) ≈ SMatrix{2,2}(2.5, 0.0, 0.0, 2.5)
+        # d(v[1]*w)/dv — the outer-product case: value-space products, no operand swap
+        J1w = differentiate(v[ScalarConst(1)] * w, v)
+        @test materialize(simplify(J1w), (w = SVector(2.0, 3.0), v = SVector(0.0, 0.0))) ≈
+            fdj(vv -> vv[1] .* [2.0, 3.0], [0.0, 0.0])
+        # gradient: scalar built from a vector → 1×2 row
+        g = differentiate(v[ScalarConst(1)] / v[ScalarConst(2)], v)
+        @test eltype(g) === SMatrix{1,2,Float64,2}
+        @test materialize(simplify(g), (v = SVector(2.0, 4.0),)) ≈ fdj(vv -> [vv[1] / vv[2]], [2.0, 4.0])
+        # column: vector out, scalar in
+        c = differentiate(sin(x) * v, x)
+        @test eltype(c) === SVector{2,Float64}
+        @test materialize(simplify(c), (x = 0.7, v = SVector(1.0, 2.0))) ≈
+            (sin(0.7 + 1e-6) .* [1.0, 2.0] .- sin(0.7 - 1e-6) .* [1.0, 2.0]) ./ 2e-6
 
-        # array × scalar literal: d(v*3.0)/dv = I*3.0 (must not regress)
-        d_arr_lit = simplify(differentiate(v * ScalarConst(3.0), v))
-        @test d_arr_lit isa AbstractScalar
+        # scalar literal × / \ array (must not regress)
+        @test eltype(simplify(differentiate(2v, v))) === SMatrix{2,2,Float64,4}
+        @test eltype(simplify(differentiate(ScalarConst(2) \ v, v))) === SMatrix{2,2,Float64,4}
+        @test eltype(@inferred simplify(differentiate(ScalarConst(2.0) \ x, x))) === Float64
 
-        # scalar literal \ array sym: d(2\v)/dv (previously threw)
-        d_ldiv_arr = simplify(differentiate(ScalarConst(2) \ v, v))
-        @test d_ldiv_arr isa AbstractScalar
-        @test eltype(d_ldiv_arr) === SMatrix{2,2,Float64,4}
+        # differentiate w.r.t. one array element: a single JVP seeded with the unit there
+        # ∂(scalar independent of v)/∂v[i] = 0
+        @test @inferred(differentiate(x, v[i])) isa ScalarZero{Bool}
+        # ∂v/∂v[i] = i-th column of the identity, I[:, i]
+        d_v_vi = @inferred differentiate(v, v[i])
+        @test d_v_vi isa ScalarRef
+        @test d_v_vi.arr isa ScalarOne
+        @test d_v_vi.indices[1] isa ScalarConst{Colon}
+        @test d_v_vi.indices[2] === i
+        @test eltype(d_v_vi) === SVector{2,Bool}
+        # d(v[1])/dv: scalar ref w.r.t. vector sym → 1×2 row e_1ᵀ. Purely
+        # structural (a 0/1 row, no value scalar to promote with) → Bool-shaped,
+        # like differentiate(v, v) === ScalarOne{SMatrix{N,N,Bool}}.
+        d_v1_v = differentiate(v[ScalarConst(1)], v)
+        @test eltype(d_v1_v) === SMatrix{1,2,Bool,2}
+        @test materialize(simplify(d_v1_v), NamedTuple()) == SMatrix{1,2}(true, false)
+        # d(2v[1])/d(v[2]) = 0
+        @test simplify(differentiate(2v[ScalarConst(1)], v[ScalarConst(2)])) == ScalarConst(0)
+    end
 
-        # scalar \ scalar regression
-        d_ldiv_s = @inferred simplify(differentiate(ScalarConst(2.0) \ x, x))
-        @test d_ldiv_s isa AbstractScalar
-        @test eltype(d_ldiv_s) === Float64
+    @testset "OneHotScalar" begin
+        # construction, eltype, materialize, display — Bool-shaped (structure only)
+        oh = @inferred OneHotScalar{3, 2}()
+        @test oh isa AbstractScalar{SVector{3, Bool}}
+        @test eltype(oh) === SVector{3, Bool}
+        @test materialize(oh, NamedTuple()) === SVector(false, true, false)
+        @test sprint(show, oh) == "e2"
+        @test (@inferred OneHotScalar(SVector{3, Float64}, static(2))) isa OneHotScalar{3, 2}
+        @test_throws ArgumentError OneHotScalar{3, 4}()   # K > N
 
-        # d(x)/d(v[i]): scalar expr w.r.t. ScalarRef — no colon pad (scalar output)
-        d_wrt_ref_s = @inferred differentiate(x, v[i])
-        @test d_wrt_ref_s isa ScalarRef
-        @test d_wrt_ref_s.arr isa ScalarZero
-        @test d_wrt_ref_s.indices === (i,)
-        @test eltype(d_wrt_ref_s) === Bool
+        # type-level index folds structurally (type-stable)
+        @test (@inferred simplify(oh[static(2)])) isa ScalarOne{Bool}
+        @test (@inferred simplify(oh[static(1)])) isa ScalarZero{Bool}
+        @test (@inferred simplify(oh[static(3)])) isa ScalarZero{Bool}
+        # runtime index → stable Bool ScalarConst (no identity fold)
+        @test (@inferred simplify(oh[2])) === ScalarConst(true)
+        @test (@inferred simplify(oh[1])) === ScalarConst(false)
+    end
 
-        # d(v)/d(v[i]): vector expr w.r.t. ScalarRef — Colon prepended (vector output)
-        d_wrt_ref_v = @inferred differentiate(v, v[i])
-        @test d_wrt_ref_v isa ScalarRef
-        @test d_wrt_ref_v.arr isa ScalarOne
-        @test d_wrt_ref_v.indices[1] isa ScalarConst{Colon}
-        @test d_wrt_ref_v.indices[2] === i
-        @test eltype(d_wrt_ref_v) === SVector{2,Bool}
+    @testset "sparse dense Jacobian" begin
+        x = ScalarSym{:x}()
+        @scalar v SVector{3, Float64}
 
-        # d(v[1])/d(v): scalar ref w.r.t. vector sym — constant index wrapped to preserve row shape
-        d_scalar_ref_wrt_v = @inferred differentiate(v[ScalarConst(1)], v)
-        @test d_scalar_ref_wrt_v isa ScalarRef
-        @test eltype(d_scalar_ref_wrt_v) === SMatrix{1,2,Bool,2}
+        nodes(s::ScalarCall) = 1 + sum(nodes, s.args; init = 0)
+        nodes(s::ScalarRef) = 1 + nodes(s.arr) + sum(nodes, s.indices; init = 0)
+        nodes(::AbstractScalar) = 1
 
-        # d(2v[1])/d(v[2]): exercises the fixed product rule path
-        d_2v1_wrt_v2 = @inferred differentiate(2v[ScalarConst(1)], v[ScalarConst(2)])
-        @test d_2v1_wrt_v2 isa AbstractScalar
-        @test eltype(d_2v1_wrt_v2) === Float64
+        # d(x*v)/dv collapses to the structural diagonal SMatrix(x,O,O, O,x,O, O,O,x)
+        s = @inferred simplify(differentiate(x * v, v))
+        @test s isa ScalarCall{<:Type{<:SMatrix}}
+        @test nodes(s) == 10
+        @test count(a -> a === x, s.args) == 3
+        @test count(a -> a isa ScalarZero, s.args) == 6
+        # values unchanged
+        @test materialize(s, (x = 2.5,)) ≈ SMatrix{3,3}(2.5,0.0,0.0, 0.0,2.5,0.0, 0.0,0.0,2.5)
 
-        # simplify(d(2v[1])/d(v[2])) = 0
-        @test simplify(d_2v1_wrt_v2) == ScalarConst(0)
+        # self-derivative still the clean identity node
+        @test (@inferred differentiate(v, v)) isa ScalarOne{SMatrix{3,3,Bool,9}}
+    end
+
+    @testset "static indices" begin
+        @scalar a; @scalar b; @scalar c; @scalar d; @scalar u; @scalar x
+        @scalar v SVector{3, Float64}
+        @scalar w SVector{3, Float64}
+
+        # (B) derivative w.r.t. a static-indexed element folds structurally
+        @test (@inferred simplify(differentiate(v[static(1)], v[static(2)]))) isa ScalarZero{Bool}
+        @test (@inferred simplify(differentiate(v[static(2)], v[static(2)]))) isa ScalarOne{Bool}
+        @test materialize(simplify(differentiate(v[static(1)], v[static(2)])), NamedTuple()) === false
+        @test materialize(simplify(differentiate(v[static(2)], v[static(2)])), NamedTuple()) === true
+        # vector f → one-hot column
+        col = @inferred simplify(differentiate(v, v[static(1)]))
+        @test col isa OneHotScalar{3, 1}
+        @test materialize(col, NamedTuple()) === SVector(true, false, false)
+        # static indices also sparsify the product-rule Jacobian
+        @test simplify(differentiate(v[static(1)] * w, v[static(1)])) === w
+
+        # OneHotScalar is a constant leaf: differentiating it again is zero
+        # (e.g. ∂/∂x of the constant column ∂v/∂v[1])
+        @test (@inferred pushforward(col, x, ScalarOne(Float64))) isa ScalarZero{SVector{3, Bool}}
+        @test (@inferred differentiate(differentiate(v, v[static(1)]), x)) isa ScalarZero{SVector{3, Bool}}
+
+        # (A) heterogeneous SA-constructor extraction is type-stable with static indices
+        m = SMatrix{2,2}(a, b, c, d)
+        @test (@inferred simplify(m[static(1), static(2)])) === c   # col-major [1,2] → arg 3
+        @test (@inferred simplify(SVector(u, u, u)[static(2)])) === u
+
+        # regression: runtime indices unchanged (value-carrier; runtime extraction)
+        @test simplify(differentiate(v[ScalarConst(1)], v[ScalarConst(2)])) === ScalarConst(false)
+        @test simplify(m[1, 2]) === c
     end
 
     @testset "differentiate nonlinear" begin

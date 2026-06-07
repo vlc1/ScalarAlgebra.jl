@@ -9,6 +9,8 @@ materialize(sc::ScalarSym{S}, pairs::NamedTuple) where {S} = pairs[S]
 materialize(sc::ScalarConst, ::NamedTuple) = sc.val
 materialize(::ScalarZero{T}, ::NamedTuple) where {T} = zero(T)
 materialize(::ScalarOne{T}, ::NamedTuple) where {T} = one(T)
+materialize(::OneHotScalar{N, K}, ::NamedTuple) where {N, K} =
+    SVector{N, Bool}(ntuple(m -> m == K, N))
 materialize(sc::ScalarCall, pairs::NamedTuple) =
     sc.fn(map(a -> materialize(a, pairs), sc.args)...)
 materialize(sc::ScalarRef, pairs::NamedTuple) =

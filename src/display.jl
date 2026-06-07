@@ -12,6 +12,7 @@ _scalar_show(io::IO, ::ScalarSym{S}) where {S} = print(io, S)
 _scalar_show(io::IO, s::ScalarConst) = show(io, s.val)
 _scalar_show(io::IO, ::ScalarZero) = print(io, 'O')
 _scalar_show(io::IO, ::ScalarOne) = print(io, 'U')
+_scalar_show(io::IO, ::OneHotScalar{N, K}) where {N, K} = print(io, "e", K)
 
 _fn_name(fn) = nameof(fn)
 _fn_name(::Type{<:SVector})      = :SVector

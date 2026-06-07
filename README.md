@@ -16,6 +16,7 @@ concrete element type computed at construction time via `Base.promote_op`.
 | `ScalarOne{T}` | leaf | structural multiplicative identity (Bool-shaped `T`) |
 | `ScalarCall{F,A,T}` | node | applies `fn::F` to `args::A` |
 | `ScalarRef{A,I,T}` | node | symbolic array index `arr[indices...]` |
+| `OneHotScalar{N,K}` | leaf | Bool-shaped structural basis vector `e_K ∈ SVector{N,Bool}` (Jacobian seed) |
 
 **`simplify`** — post-order tree rewrite. Rules cover identity elements,
 zero annihilation, constant folding, double negation, same-symbol cancellation,
@@ -23,12 +24,23 @@ and index distribution through pointwise nodes. All rules are type-stable
 (`@inferred`-safe); `ScalarOne` index results return `ScalarConst` rather than
 a union.
 
-**`differentiate`** — symbolic Jacobian. Chain rules for `+`, `-`, `*`, `/`,
-`\`, and `ScalarRef`. Jacobian shape follows `_jacobian_type(S, T)`:
-`(Number, Number) → promote_type`, `(SVector{M}, SVector{N}) → SMatrix{M,N}`,
-`(Number, SVector{N}) → SMatrix{1,N}`, `(SVector{M}, Number) → SVector{M}`.
-Scalar-times-array and scalar-left-divides-array branches use the outer-product
-operand order to preserve shape.
+**`pushforward`** — the differentiation core: `pushforward(f, x, ẋ)` is the
+forward-mode directional derivative (JVP) of `f` along input tangent `ẋ`. The
+result lives in `f`'s own value space, so every product in the chain/Leibniz
+rules is an ordinary value-space op — correct by construction, no covector or
+operand-order bookkeeping. Rules cover `+ - * / \ ^` and the unary nonlinear
+functions (`exp, log, sin, cos, tan, sqrt, abs, sign`); `min`/`max` and
+non-constant exponents raise a clear `ArgumentError`.
+
+**`differentiate`** — the dense Jacobian, reconstructed from `pushforward` by
+seeding the input tangent space: scalar input → one JVP (`ScalarOne` seed);
+`SVector{N}` input → one JVP per basis direction, seeded with a structural
+`OneHotScalar` and assembled into `SMatrix{M,N}` (vector output) or `SMatrix{1,N}`
+(scalar-output gradient row). The one-hot seeds carry their hot position in the
+type (via [`Static`](https://github.com/SciML/Static.jl)), so indexing folds to
+`ScalarOne`/`ScalarZero` and the Jacobian collapses to its sparse structural form
+(`d(x*v)/dv → SMatrix(x,0,0, 0,x,0, 0,0,x)`). Self-derivatives fold to clean
+`ScalarOne` identities.
 
 **`materialize`** — evaluates a tree against a `NamedTuple` of bindings.
 
@@ -57,3 +69,18 @@ v = materialize(expr, (x = 1.0, u = SVector(3.0, 4.0)))
 parameter is Bool-shaped: `Bool` for `Number` eltypes, `SMatrix{N,N,Bool}`
 for `SVector{N}` eltypes. This lets simplification rules collapse identity
 and zero expressions purely by dispatch.
+
+## Static indices
+
+Index with `static(k)` (`using Static`) to keep the index in the type domain.
+Then constant folds are fully type-stable and structural where runtime indices
+cannot be: `SMatrix(a,b,c,d)[static(1),static(2)]` extracts `c` type-stably even
+for heterogeneous constructors, and `differentiate(v[static(i)], v[static(j)])`
+folds to a structural `ScalarOne`/`ScalarZero` (Kronecker δ) — which also
+sparsifies product-rule Jacobians like `d(v[static(1)]*w)/d(v[static(1)])`.
+Runtime indices (`v[1]`) still work but yield value-carrying `ScalarConst`s.
+
+## To do
+
+- Reverse-mode pullback / VJP for efficient scalar-output gradients.
+- Matrix-valued (`SMatrix`) symbol differentiation.

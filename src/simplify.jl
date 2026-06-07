@@ -139,6 +139,17 @@ _simplify_ref(::ScalarZero{T}, indices::Tuple{Vararg{ScalarConst}}) where {T} =
 _simplify_ref(::ScalarOne{T}, indices::Tuple{Vararg{ScalarConst}}) where {T} =
     ScalarConst(one(T)[getfield.(indices, :val)...])
 
+# OneHotScalar: a type-level index folds structurally to ScalarOne / ScalarZero,
+# which lets the surrounding identity rules (x*1→x, x*0→0) collapse dense
+# Jacobians. A runtime integer index stays type-stable as a Bool ScalarConst (no
+# identity fold). A symbolic index falls through to the generic ScalarRef.
+_simplify_ref(::OneHotScalar{N, K}, ::Tuple{ScalarConst{StaticInt{K}}}) where {N, K} =
+    ScalarOne(Bool)
+_simplify_ref(::OneHotScalar{N, K}, ::Tuple{ScalarConst{StaticInt{M}}}) where {N, K, M} =
+    ScalarZero(Bool)
+_simplify_ref(::OneHotScalar{N, K}, (idx,)::Tuple{ScalarConst{<:Integer}}) where {N, K} =
+    ScalarConst(idx.val == K)
+
 _simplify_ref(call::ScalarCall, indices) =
     _simplify_ref_call(call.fn, call.args, indices)
 
@@ -152,18 +163,29 @@ _simplify_ref_call(::typeof(/), args, indices) =
     _simplify_ref_rdiv(args, indices)
 _simplify_ref_call(::typeof(\), args, indices) =
     _simplify_ref_ldiv(args, indices)
+
 # Index into a StaticArray constructor with constant integer indices: extract the
 # corresponding arg. Uses LinearIndices for cartesian→linear (column-major) conversion.
 # Type-stable when the constructor args are homogeneous (e.g. SVector(u, u)[1]); for
 # heterogeneous args (SMatrix(a, b, c, d)[1, 2]) the result type is a small Union
-# because the index value lives in the value domain, not the type domain. Full
-# stability would require lifting the index into the type (Val/Static) so a
-# @generated extractor could read it — see follow-up note in the plan.
+# because the index value lives in the value domain, not the type domain. Use
+# `static` indices for full stability — see the StaticInt method below.
 function _simplify_ref_call(
     ::Type{SA}, args, indices::Tuple{Vararg{ScalarConst{<:Integer}}}
 ) where {SA <: StaticArray}
     linear = LinearIndices(Tuple(Size(SA)))[map(a -> a.val, indices)...]
     args[linear]
+end
+
+# StaticInt indices live in the type, so the linear index is computed at macro
+# time and the extraction is type-stable even for heterogeneous constructors.
+# More specific than the runtime method above (StaticInt <: Integer).
+@generated function _simplify_ref_call(
+    ::Type{SA}, args, indices::Tuple{Vararg{ScalarConst{<:StaticInt}}}
+) where {SA <: StaticArray}
+    vals = (p.parameters[1].parameters[1] for p in indices.parameters)  # StaticInt{v} → v
+    linear = LinearIndices(Tuple(Size(SA)))[vals...]
+    :(args[$linear])
 end
 
 _simplify_ref_call(fn, args, indices) = ScalarRef(ScalarCall(fn, args), indices)

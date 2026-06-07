@@ -21,35 +21,15 @@ _to_bool_shape(::Type{T}) where {T <: StaticArray} = similar_type(T, Bool)
             "got T=$(T). Use e.g. Null(x) or Null(typeof(x)) to construct correctly."))
 end
 
-_colon_pad(::Type{<:Number}) = ()
-_colon_pad(::Type{<:AbstractArray{T, N}}) where {T, N} = ntuple(Returns(ScalarConst(Colon())), N)
-
-# Jacobian eltype `J = Jac(S, T)` (`S` is output type, `T` is input type).
-_jacobian_type(S::Type{<: Number}, T::Type{<: Number}) = promote_type(S, T)
-
-# no proper row vector
-_jacobian_type(S::Type{<: Number}, ::Type{SVector{N, T}}) where {N, T} =
-    similar_type(SMatrix{1, N, T}, promote_type(S, T))
-
-_jacobian_type(::Type{SVector{M, S}}, T::Type{<: Number},) where {M, S} =
-    similar_type(SVector{M, S}, promote_type(S, T))
-
-# `similar_type` fills in the trailing `L = M * N`, giving the concrete form
-# `SMatrix{M, N, F, M * N}` that `_assert_concrete` accepts.
-_jacobian_type(::Type{SVector{M, S}}, ::Type{SVector{N, T}}) where {N, M, S, T} =
-    similar_type(SMatrix{M, N, S}, promote_type(S, T))
-
-_jacobian_type(S::Type, T::Type) = throw(ArgumentError(
-    "differentiate: unsupported shape pair eltype(s)=$S vs eltype(v)=$T. " *
-    "Only (Number, Number) and matching-N (SVector{N}, SVector{N}) pairs are " *
-    "supported by default. To enable additional combinations, add a method:\n" *
-    "    StencilCore._jacobian_type(::Type{S}, ::Type{T}) = <Jacobian type>"))
-
-# Linear-map space of a value-space type `T` — the type whose `one(·)` is the
-# multiplicative identity for things in `T`'s algebra. Delegates to
-# `_jacobian_type(T, T)`: Number stays itself; SVector{N,F} maps to the
-# canonical square SMatrix{N,N,F}; same-type T returns T.
-_unity_space(::Type{T}) where {T} = _jacobian_type(T, T)
+# Multiplicative-identity (unity) space of a value-space type `T` — the type
+# whose `one(·)` is the multiplicative identity for things in `T`'s algebra:
+# Number stays itself; SVector{N,F} maps to the canonical square SMatrix{N,N,F}.
+# Used by `ScalarOne` construction (`src/types.jl`).
+_unity_space(::Type{T}) where {T <: Number} = T
+_unity_space(::Type{SVector{N, T}}) where {N, T} = similar_type(SMatrix{N, N, T}, T)
+_unity_space(T::Type) = throw(ArgumentError(
+    "ScalarOne: unsupported value-space type $T. Only Number and SVector{N} are " *
+    "supported (matrix-valued symbols are out of scope)."))
 
 #_value_space(::Type{<: Number}) = Bool
 #_value_space(::Type{<: SMatrix{N, N, T}}) where {N, T} =

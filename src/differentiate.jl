@@ -1,130 +1,67 @@
 """
-    differentiate(a::AbstractScalar, b::ScalarSym) -> AbstractScalar
+    differentiate(f::AbstractScalar, x::ScalarSym) -> AbstractScalar
+    differentiate(f::AbstractScalar, b::ScalarRef) -> AbstractScalar
 
-Symbolic differentiation of scalar expression `a` with respect to symbol `b`.
-Returns the Jacobian as an `AbstractScalar` whose `eltype` is determined by
-`_jacobian_type(eltype(a), eltype(b))`:
+Dense Jacobian of `f`, reconstructed from [`pushforward`](@ref) by seeding the
+input tangent space:
 
-- `(Number, Number)` → `promote_type(S, T)` (scalar derivative)
-- `(SVector{M}, SVector{N})` → `SMatrix{M,N}` (full Jacobian matrix)
-- `(Number, SVector{N})` → `SMatrix{1,N}` (row / gradient)
-- `(SVector{M}, Number)` → `SVector{M}` (column / directional)
-
-## Outer-product ordering in chain rules
-
-The gradient of a scalar w.r.t. `SVector{N}` is a row (`SMatrix{1,N}`). When this row
-Jacobian `du` is combined with an array value `v::SVector{N}`, operand order is critical:
-
-- `du * v` = `SMatrix{1,N} × SVector{N}` → inner product → `SVector{1}` (wrong shape)
-- `v * du` = `SVector{N} × SMatrix{1,N}` → outer product → `SMatrix{N,N}` (correct)
-
-Two rules apply this swap via more-specific overloads:
-
-| operator | case | formula |
-|----------|------|---------|
-| `*` | `scalar × array` | `v * du + u * dv` |
-| `\\` | `scalar \\ array` | `u \\ (dv - (u\\v) * du)` |
-
-`/` is unaffected: `(u/v)` is already the array and sits on the left of `*` in its formula.
+- scalar input (`eltype(x) <: Number`): a single JVP seeded with `1`. Output
+  shape follows `eltype(f)` (scalar → scalar, `SVector{M}` → column).
+- vector input (`eltype(x) == SVector{N}`): one JVP per basis direction `eⱼ`,
+  the columns assembled into the dense Jacobian — `SMatrix{M,N}` for `SVector{M}`
+  output, `SMatrix{1,N}` (a row) for scalar output.
+- `differentiate(f, b::ScalarRef)` is `∂f/∂(b.arr[b.indices])`: one JVP seeded
+  with the unit tangent selecting that element (the `b.indices`-th column of the
+  identity).
 """
 function differentiate end
 
-differentiate(a::AbstractScalar, b::ScalarSym) =
-    ScalarZero(_jacobian_type(eltype(a), eltype(b)))
+# scalar input: one JVP seeded with 1 (scalar self-derivative folds to ScalarOne)
+differentiate(f::AbstractScalar, x::ScalarSym{S, T}) where {S, T <: Number} =
+    pushforward(f, x, ScalarOne(T))
 
-differentiate(a::AbstractScalar, b::ScalarRef) =
-    ScalarRef(differentiate(a, b.arr), (_colon_pad(eltype(a))..., b.indices...))
+# vector self-derivative: keep the clean structural identity rather than
+# reconstructing it column by column (strictly more specific than the generic
+# vector method below, so no dispatch ambiguity).
+differentiate(::ScalarSym{S, SVector{N, T}}, ::ScalarSym{S, SVector{N, T}}) where {S, N, T} =
+    ScalarOne(SVector{N, T})
 
-# ScalarSym: identical symbols and `eltype`s
-differentiate(::T, ::T) where {T <: ScalarSym} = ScalarOne(eltype(T))
+# vector input SVector{N}: seed each basis direction with a structural one-hot,
+# assemble the columns. Type-level (StaticInt) seed/row indices let the one-hot
+# folds (`src/simplify.jl`) collapse the Jacobian to its sparse structural form.
+differentiate(f::AbstractScalar, x::ScalarSym{S, SVector{N, T}}) where {S, N, T} =
+    _assemble_jacobian(_jvp_columns(f, x, SVector{N, T}), eltype(f), Val(N))
 
-# ScalarCall
-_differentiate_args(::Tuple{}, _) = ()
-_differentiate_args((a, as...)::Tuple{AbstractScalar, Vararg}, b) =
-    differentiate(a, b), _differentiate_args(as, b)...
+# JVP columns, one per basis direction. @generated so each seed's hot index is a
+# literal type parameter (the columns have distinct OneHotScalar{N,K} types).
+@generated function _jvp_columns(f, x, ::Type{SVector{N, T}}) where {N, T}
+    cols = (:(pushforward(f, x, OneHotScalar{$N, $K}())) for K in 1:N)
+    :(($(cols...),))
+end
 
-differentiate(a::ScalarCall, b::ScalarSym) =
-    _differentiate_call(a.fn, a.args, _differentiate_args(a.args, b))
+# derivative w.r.t. one array element: a single JVP seeded with the unit there
+differentiate(f::AbstractScalar, b::ScalarRef) =
+    pushforward(f, b.arr, _unit_seed(b.arr, b.indices))
 
-# addition
-_differentiate_call(::typeof(+), _, ders) = ScalarCall(+, ders)
+# unit tangent selecting element `k` of an SVector-valued symbol: I[:, k] = e_k.
+# A static index seeds with a structural one-hot so the derivative folds to
+# ScalarOne/ScalarZero (e.g. d(v[static i])/d(v[static j]) → δ_ij); a runtime or
+# symbolic index keeps the I[:, k] slice (folds to a Bool ScalarConst).
+_unit_seed(::AbstractScalar{SVector{N, T}}, ::Tuple{ScalarConst{StaticInt{K}}}) where {N, T, K} =
+    OneHotScalar{N, K}()
+_unit_seed(arr::AbstractScalar{<:SVector}, (k,)::Tuple{AbstractScalar}) =
+    ScalarRef(ScalarOne(eltype(arr)), (ScalarConst(Colon()), k))
 
-# subtraction
-_differentiate_call(::typeof(-), _, ders) = ScalarCall(-, ders)
-
-# multiplication
-_differentiate_call(::typeof(*), args, ders) = _differentiate_mul(args, ders)
-
-_differentiate_mul(
-    (u, v)::Tuple{AbstractScalar{<:Number}, AbstractScalar{<:AbstractArray}},
-    (du, dv)::NTuple{2, AbstractScalar}) = v * du + u * dv
-
-_differentiate_mul(((u, v), (du, dv))::Vararg{NTuple{2, AbstractScalar}, 2}) =
-    du * v + u * dv
-
-# right-division
-_differentiate_call(::typeof(/), args, ders) = _differentiate_rdiv(args, ders)
-
-_differentiate_rdiv(((u, v), (du, dv))::Vararg{NTuple{2, AbstractScalar}, 2}) =
-    (du - (u / v) * dv) / v
-
-# left-division
-_differentiate_call(::typeof(\), args, ders) = _differentiate_ldiv(args, ders)
-
-_differentiate_ldiv(
-    (u, v)::Tuple{AbstractScalar{<:Number}, AbstractScalar{<:AbstractArray}},
-    (du, dv)::NTuple{2, AbstractScalar}) = u \ (dv - (u \ v) * du)
-
-_differentiate_ldiv(((u, v), (du, dv))::Vararg{NTuple{2, AbstractScalar}, 2}) =
-    u \ (dv - du * (u \ v))
-
-# unary nonlinear functions: chain rule  d f(u) = f'(u) * du.
-# Scalar-eltype only; f' is expressed back in the algebra.
-_differentiate_call(::typeof(exp), (u,)::Tuple{AbstractScalar}, (du,)::Tuple{AbstractScalar}) =
-    exp(u) * du
-_differentiate_call(::typeof(log), (u,)::Tuple{AbstractScalar}, (du,)::Tuple{AbstractScalar}) =
-    du / u
-_differentiate_call(::typeof(sin), (u,)::Tuple{AbstractScalar}, (du,)::Tuple{AbstractScalar}) =
-    cos(u) * du
-_differentiate_call(::typeof(cos), (u,)::Tuple{AbstractScalar}, (du,)::Tuple{AbstractScalar}) =
-    -sin(u) * du
-_differentiate_call(::typeof(tan), (u,)::Tuple{AbstractScalar}, (du,)::Tuple{AbstractScalar}) =
-    du / cos(u)^2
-_differentiate_call(::typeof(sqrt), (u,)::Tuple{AbstractScalar}, (du,)::Tuple{AbstractScalar}) =
-    du / (2 * sqrt(u))
-_differentiate_call(::typeof(abs), (u,)::Tuple{AbstractScalar}, (du,)::Tuple{AbstractScalar}) =
-    sign(u) * du
-# sign is piecewise-constant: derivative is structurally zero everywhere it exists.
-_differentiate_call(::typeof(sign), (u,)::Tuple{AbstractScalar}, (du,)::Tuple{AbstractScalar}) =
-    ScalarZero(eltype(du))
-
-# power with constant exponent:  d(u^c) = c*u^(c-1) * du  (dc = 0).
-_differentiate_call(::typeof(^), (u, c)::Tuple{AbstractScalar, ScalarConst},
-    (du, _)::NTuple{2, AbstractScalar}) = (c * u^(c.val - 1)) * du
-_differentiate_call(::typeof(^), (u, _)::Tuple{AbstractScalar, ScalarOne},
-    (du, _)::NTuple{2, AbstractScalar}) = du
-_differentiate_call(::typeof(^), ::Tuple{AbstractScalar, AbstractScalar},
-    ::NTuple{2, AbstractScalar}) = throw(ArgumentError(
-    "differentiate: u^v with non-constant exponent is unsupported"))
-
-# min/max have a value-dependent subgradient — not representable as a single
-# type-stable node. Fail loudly rather than leak a MethodError.
-_differentiate_call(::typeof(min), ::NTuple{2, AbstractScalar}, ::NTuple{2, AbstractScalar}) =
-    throw(ArgumentError("differentiate: min is not differentiable (value-dependent subgradient)"))
-_differentiate_call(::typeof(max), ::NTuple{2, AbstractScalar}, ::NTuple{2, AbstractScalar}) =
-    throw(ArgumentError("differentiate: max is not differentiable (value-dependent subgradient)"))
-
-# ScalarRef
-_wrap_scalar_index(idx::ScalarConst{<:Integer}) = ScalarConst(SVector(idx.val))
-_wrap_scalar_index(idx) = idx
-
-# When ref has scalar output and sym has array input, integer indices collapse the row
-# dimension of the Jacobian (M[i,:] → SVector vs M[SA[i],:] → SMatrix{1,N}).
-# Wrap them to preserve shape.
-_ref_indices(indices, ::Type{<:Number}, ::Type{<:AbstractArray}) =
-    map(_wrap_scalar_index, indices)
-_ref_indices(indices, _, _) = indices
-
-differentiate(a::ScalarRef, b::ScalarSym) =
-    ScalarRef(differentiate(a.arr, b),
-        (_ref_indices(a.indices, eltype(a), eltype(b))..., _colon_pad(eltype(b))...))
+# Assemble the JVP columns into the dense Jacobian. This is the single place
+# where output shape is materialized.
+# scalar output → 1×N row
+_assemble_jacobian(cols::NTuple{N, AbstractScalar}, ::Type{<:Number}, ::Val{N}) where {N} =
+    SMatrix{1, N}(cols...)
+# SVector{M} output → M×N matrix, column-major (entry l ↦ cols[col][row]).
+# @generated so column/row indices are literals — rows index with StaticInt so
+# one-hot columns fold to ScalarOne/ScalarZero, type-stably regardless of how
+# complex the column expressions are.
+@generated function _assemble_jacobian(cols::NTuple{N, AbstractScalar}, ::Type{<:SVector{M}}, ::Val{N}) where {M, N}
+    entries = (:(cols[$(cld(l, M))][static($(mod1(l, M)))]) for l in 1:M*N)
+    :(SMatrix{$M, $N}($(entries...)))
+end

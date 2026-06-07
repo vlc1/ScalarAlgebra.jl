@@ -14,7 +14,9 @@ is the concrete element type (Number or StaticArray). Leaf types:
 `ScalarZero{T}` (additive identity, Bool-shaped), `ScalarOne{T}`
 (multiplicative identity, Bool-shaped). Interior node: `ScalarCall{F,A,T}`
 (applies `fn` to `args`). Index node: `ScalarRef{A,I,T}` (symbolic array
-indexing).
+indexing). Seed leaf: `OneHotScalar{N,K}` (Bool-shaped structural basis vector `e_K ∈
+SVector{N,Bool}`, hot position `K` in the type; value eltype comes from
+promotion, like `ScalarZero`/`ScalarOne`).
 
 **Bool-shaped identity types**: `ScalarZero` and `ScalarOne` carry a
 Bool-shaped type parameter — Bool for scalar eltypes, SMatrix{N,N,Bool} for
@@ -40,42 +42,50 @@ value (e.g. diagonal vs off-diagonal in `ScalarOne`), return a value-carrying
 node (`ScalarConst`) instead of a structurally-typed node to preserve type
 stability.
 
-**Outer-product ordering in chain rules**: The Jacobian of a scalar w.r.t.
-`SVector{N}` is a row (`SMatrix{1,N}`). When this row Jacobian `du` appears in
-a product with an array value `v::SVector{N}`, operand order is critical:
-- `du * v` = `SMatrix{1,N} × SVector{N}` → inner product → `SVector{1}` (wrong
-  shape)
-- `v * du` = `SVector{N} × SMatrix{1,N}` → outer product → `SMatrix{N,N}`
-  (correct)
+**Differentiation = forward-mode pushforward** (`src/differentiate.jl`): the
+core primitive is `pushforward(f, x::ScalarSym, ẋ)` — the directional derivative
+(JVP) of `f` along input tangent `ẋ`. Its result lives in `f`'s **own value
+space** (`eltype(pushforward(f, …)) == eltype(f)`): the tangent of a
+scalar-valued node is a scalar, of a vector-valued node a vector. Consequently
+**every product in the chain/Leibniz rules is an ordinary value-space op** —
+there is no covector, no `SMatrix{1,N}` row, and no operand-order bookkeeping.
+The rules dispatch via `_pushforward_call(fn, args, x, ẋ)` (mirroring
+`_simplify_call`); `*` is uniformly `u*pf(v) + pf(u)*v`.
 
-Two differentiation rules require the outer-product order
-(`src/differentiate.jl`):
-- `scalar × array` multiplication: use `v * du + u * dv` not `du * v + u * dv`
-- `scalar \ array` left-division: use `u \ (dv - (u\v) * du)` not `u \ (dv - du
-  * (u\v))`
+The dense Jacobian `differentiate(f, x)` is **reconstructed from `pushforward`**
+by seeding the input tangent space (`src/differentiate.jl`):
+- scalar input (`eltype(x)<:Number`): one JVP seeded with `ScalarOne` →
+  scalar/column output by `eltype(f)`.
+- vector input (`SVector{N}`): one JVP per basis direction, seeded with a
+  **structural** `OneHotScalar{N,K,T}` (`_basis`); columns built by the
+  `@generated` `_jvp_columns` (literal `K`, so each column type is concrete).
+  `_assemble_jacobian` is the **single place** output shape is materialized —
+  `SMatrix{M,N}` (vector output) or `SMatrix{1,N}` (scalar-output row), built via
+  the SA-constructor interception. It is `@generated` for `SVector` output so
+  rows index with `StaticInt`; then `OneHotScalar[StaticInt]` folds to
+  `ScalarOne`/`ScalarZero` (`_simplify_ref`, `src/simplify.jl`) and the identity
+  rules collapse the Jacobian to its **sparse** structural form (e.g.
+  `d(x*v)/dv → SMatrix(x,O,O, O,x,O, O,O,x)`). Type-level indices (via `Static`)
+  are required: a runtime index would make the One/Zero choice a `Union`.
+- `differentiate(f, b::ScalarRef)` = `∂f/∂(b.arr[b.indices])`: one JVP seeded by
+  `_unit_seed`. A **static** index (`b.indices :: ScalarConst{StaticInt}`) seeds
+  with a structural `OneHotScalar{N,K}` so the result folds to `ScalarOne`/
+  `ScalarZero` (Kronecker δ); a runtime/symbolic index uses the `I[:, k]` slice
+  (`ScalarRef(ScalarOne, (Colon, k))`) and folds to a Bool `ScalarConst`.
 
-**`differentiate(a, b::ScalarRef)` index construction**: The method
-`differentiate(a::AbstractScalar, b::ScalarRef)` computes
-`da/d(b.arr[b.indices])`.  The full index tuple must be
-`(_colon_pad(eltype(a))..., b.indices...)`:
-- `_colon_pad(eltype(a))` adds colons for `a`'s output dimensions (empty for
-  `Number` output, one colon for `SVector` output)
-- `b.indices` selects the specific input element Using `a.indices` (wrong
-  variable) instead of `b.indices` is a silent bug for non-`ScalarRef` `a`.
+Static user indices in general (`v[static(k)]`, `StaticInt` in the type) make
+constant folds type-stable where runtime indices cannot: the `@generated`
+`_simplify_ref_call(::Type{SA}, args, ::Tuple{Vararg{ScalarConst{<:StaticInt}}})`
+(`src/simplify.jl`) extracts from a heterogeneous SA-constructor type-stably,
+and the static `_unit_seed`/`OneHotScalar` folds above. Runtime indices keep the
+existing (Union-prone-but-functional) paths.
 
-**`differentiate(a::ScalarRef, b::ScalarSym)` row-dimension preservation**:
-When `eltype(a) <: Number` (scalar output) and `eltype(b) <: AbstractArray`
-(vector input), the Jacobian must have shape `SMatrix{1,N}`, not `SVector{N}`.
-Julia's indexing collapses the row dimension:
-- `M[i, :]` = `SMatrix{M,N}[Int, Colon]` → `SVector{N}` (wrong)
-- `M[SA[i], :]` = `SMatrix{M,N}[SVector{1,Int}, Colon]` → `SMatrix{1,N}` (correct)
-
-Integer indices in `a.indices` must be wrapped as `ScalarConst(SVector(val))`
-before appending `_colon_pad(eltype(b))`. The helper `_ref_indices(indices,
-eltype(a), eltype(b))` dispatches on `(Number, AbstractArray)` to apply
-`_wrap_scalar_index` over the index tuple; all other cases pass indices through
-unchanged. Forgetting this wrap silently produces `SVector` instead of
-`SMatrix{1,N}`, breaking downstream product-rule additions.
+Self-derivatives keep clean structural nodes: scalar self folds to
+`ScalarOne{Bool}` via the seed; vector self has a dedicated more-specific method
+returning `ScalarOne(SVector{N})` (no ambiguity with the generic vector method).
+There is **no** `_jacobian_type`/`_colon_pad`/`_ref_indices` machinery anymore —
+shape is handled only in `_assemble_jacobian`. `_unity_space` (`src/utils.jl`)
+survives solely for `ScalarOne` construction.
 
 **`_simplify_ref` distribution rules**: Index distribution through `ScalarCall`
 nodes must be op-specific (`src/simplify.jl`). The dispatch pattern is
