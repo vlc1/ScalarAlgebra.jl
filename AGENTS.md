@@ -8,6 +8,21 @@ repository.
 **ScalarAlgebra** is a Julia package for symbolic scalar algebra with a
 type-level expression tree.
 
+**Verbs owned by AlgebraCore**: the generic functions `simplify`, `substitute`,
+`materialize`, `pushforward`, `differentiate` are declared (with their generic
+docstrings) in the `AlgebraCore` dependency. ScalarAlgebra `import`s and
+**extends** them; it does **not** export them (users `using AlgebraCore`). When
+adding/changing a verb method, define it on the imported function — do not
+redeclare `function <verb> end` here.
+
+**`substitute`** (`src/substitute.jl`): like `materialize` but stays in the
+algebra — replaces each `ScalarSym` named in `pairs` by `asscalar(pairs[name])`
+(raw value → `ScalarConst`; `AbstractScalar` → spliced as-is), keeps unbound
+symbols, and rebuilds nodes structurally (no simplification). Leaves use the
+`substitute(::AbstractScalar, ::NamedTuple) = sc` fallback; `ScalarSym`,
+`ScalarCall`, `ScalarRef` specialize (the latter two via the recursive
+`_substitute_args`).
+
 **Type system** (`src/types.jl`): All nodes are `AbstractScalar{T}` where `T`
 is the concrete element type (Number or StaticArray). Leaf types:
 `ScalarSym{S,T}` (named symbol), `ScalarConst{T}` (literal value),

@@ -1,10 +1,5 @@
-"""
-    simplify(s::AbstractScalar) -> AbstractScalar
-
-Structurally simplify a scalar expression tree (post-order, single pass).
-"""
-function simplify end
-
+# `simplify` is owned by AlgebraCore; these methods extend it for AbstractScalar.
+# Structural simplification of a scalar expression tree (post-order, single pass).
 simplify(sc::AbstractScalar) = sc
 
 # ScalarCall

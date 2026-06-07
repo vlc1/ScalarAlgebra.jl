@@ -1,10 +1,5 @@
-"""
-    materialize(s::AbstractScalar, pairs::NamedTuple) -> value
-
-Evaluate a scalar expression tree by substituting symbol bindings from `pairs`.
-"""
-function materialize end
-
+# `materialize` is owned by AlgebraCore; these methods extend it for AbstractScalar.
+# Evaluate a scalar expression tree by substituting symbol bindings from `pairs`.
 materialize(sc::ScalarSym{S}, pairs::NamedTuple) where {S} = pairs[S]
 materialize(sc::ScalarConst, ::NamedTuple) = sc.val
 materialize(::ScalarZero{T}, ::NamedTuple) where {T} = zero(T)

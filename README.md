@@ -44,10 +44,22 @@ type (via [`Static`](https://github.com/SciML/Static.jl)), so indexing folds to
 
 **`materialize`** — evaluates a tree against a `NamedTuple` of bindings.
 
+**`substitute`** — like `materialize` but stays symbolic: replaces the named
+symbols by `asscalar(value)` (a raw value becomes a `ScalarConst`; an
+`AbstractScalar` is spliced in) and returns an `AbstractScalar`. Partial —
+unbound symbols are kept — and lazy (no simplification).
+
+## Verbs live in AlgebraCore
+
+`simplify`, `materialize`, `pushforward`, `differentiate`, and `substitute` are
+generic functions owned by
+[`AlgebraCore`](https://github.com/vlc1/AlgebraCore.jl); ScalarAlgebra only adds
+methods for its types. Bring the verbs into scope with `using AlgebraCore`.
+
 ## Quick start
 
 ```julia
-using ScalarAlgebra, StaticArrays
+using AlgebraCore, ScalarAlgebra, StaticArrays
 
 @scalar x Float64
 @scalar u SVector{2, Float64}
@@ -61,6 +73,9 @@ s = simplify(J)                   # structural simplification
 
 # Evaluate
 v = materialize(expr, (x = 1.0, u = SVector(3.0, 4.0)))
+
+# Partial substitution stays symbolic
+p = substitute(expr, (x = 1.0,))   # 2u + 1.0*u, still an AbstractScalar in u
 ```
 
 ## Bool-shaped identity types

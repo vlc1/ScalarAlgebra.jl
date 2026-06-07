@@ -5,18 +5,18 @@
 Dense Jacobian of `f`, reconstructed from [`pushforward`](@ref) by seeding the
 input tangent space:
 
-- scalar input (`eltype(x) <: Number`): a single JVP seeded with `1`. Output
-  shape follows `eltype(f)` (scalar → scalar, `SVector{M}` → column).
+- scalar input (`eltype(x) <: Number`): a single JVP seeded with `1` (a scalar
+  self-derivative folds to `ScalarOne`). Output shape follows `eltype(f)`
+  (scalar → scalar, `SVector{M}` → column).
 - vector input (`eltype(x) == SVector{N}`): one JVP per basis direction `eⱼ`,
   the columns assembled into the dense Jacobian — `SMatrix{M,N}` for `SVector{M}`
   output, `SMatrix{1,N}` (a row) for scalar output.
 - `differentiate(f, b::ScalarRef)` is `∂f/∂(b.arr[b.indices])`: one JVP seeded
   with the unit tangent selecting that element (the `b.indices`-th column of the
   identity).
-"""
-function differentiate end
 
-# scalar input: one JVP seeded with 1 (scalar self-derivative folds to ScalarOne)
+(`differentiate` itself is owned by AlgebraCore; these methods extend it.)
+"""
 differentiate(f::AbstractScalar, x::ScalarSym{S, T}) where {S, T <: Number} =
     pushforward(f, x, ScalarOne(T))
 

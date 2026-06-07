@@ -12,12 +12,13 @@ no `SMatrix{1,N}` row, and no operand-order bookkeeping. Correctness is structur
 
 The dense Jacobian ([`differentiate`](@ref)) is reconstructed from this primitive
 by seeding the input tangent space with basis directions.
-"""
-function pushforward end
 
-# leaves --------------------------------------------------------------------
-# Same symbol: the seed itself. Different symbol / literal: zero tangent in the
-# node's own value space.
+(`pushforward` itself is owned by AlgebraCore; these methods extend it.)
+
+# leaves
+Same symbol: the seed itself. Different symbol / literal: zero tangent in the
+node's own value space.
+"""
 pushforward(::T, ::T, ẋ::AbstractScalar) where {T <: ScalarSym} = ẋ
 pushforward(f::ScalarSym, ::ScalarSym, ::AbstractScalar) = ScalarZero(eltype(f))
 pushforward(f::ScalarConst, ::ScalarSym, ::AbstractScalar) = ScalarZero(eltype(f))

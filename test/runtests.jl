@@ -2,6 +2,7 @@ using Test
 using StaticArrays
 using Static
 using ScalarAlgebra
+using AlgebraCore  # simplify, materialize, pushforward, differentiate, substitute
 
 @testset "ScalarAlgebra.jl" begin
 
@@ -453,6 +454,48 @@ using ScalarAlgebra
 
         pairs_v = (v = SVector(1.0, 2.0), i = 2)
         @test materialize(v[i], pairs_v) === 2.0
+    end
+
+    @testset "substitute" begin
+        @scalar x Float64
+        @scalar y Float64
+        @scalar v SVector{2, Float64}
+        @scalar i Int
+
+        # value binding → ScalarConst; partial substitution keeps the unbound symbol
+        r = substitute(x + y, (x = 1.0,))
+        @test r isa ScalarCall{typeof(+)}
+        @test r.args[1] === ScalarConst(1.0)
+        @test r.args[2] === y
+        @test materialize(r, (y = 4.0,)) === materialize(x + y, (x = 1.0, y = 4.0))
+
+        # expression binding splices a subtree
+        r2 = substitute(x, (x = y + ScalarConst(1.0),))
+        @test r2 isa ScalarCall{typeof(+)}
+        @test materialize(r2, (y = 2.0,)) === 3.0
+
+        # AbstractScalar binding passed through via asscalar (idempotent)
+        @test substitute(x, (x = y,)) === y
+
+        # leaves untouched; absent symbol kept
+        @test substitute(ScalarConst(2.0), (x = 1.0,)) === ScalarConst(2.0)
+        @test substitute(ScalarZero(Float64), (x = 1.0,)) isa ScalarZero
+        @test substitute(y, (x = 1.0,)) === y
+
+        # array symbol + ScalarRef + index substitution
+        rr = substitute(v[i], (v = SVector(5.0, 6.0), i = 2))
+        @test rr isa ScalarRef
+        @test materialize(rr, NamedTuple()) === 6.0
+
+        # round-trip equivalence with materialize across a small tree
+        expr = (2 * x + v[i]) / y
+        full = (x = 1.5, v = SVector(3.0, 4.0), i = 1, y = 2.0)
+        @test materialize(substitute(expr, full), NamedTuple()) === materialize(expr, full)
+
+        # type stability (each call is a distinct specialization → single branch)
+        @test (@inferred substitute(x, (x = 1.0,))) === ScalarConst(1.0)
+        @test (@inferred substitute(x, (y = 1.0,))) === x
+        @test (@inferred substitute(x + y, (x = 1.0,))) isa ScalarCall
     end
 
     @testset "differentiate" begin

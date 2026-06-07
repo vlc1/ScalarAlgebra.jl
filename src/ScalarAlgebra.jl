@@ -3,6 +3,13 @@ module ScalarAlgebra
 using StaticArrays
 using Static
 
+# The algebra verbs are owned by AlgebraCore; ScalarAlgebra extends them.
+import AlgebraCore: simplify,
+                    substitute,
+                    materialize,
+                    pushforward,
+                    differentiate
+
 export AbstractScalar,
        ScalarSym,
        ScalarConst,
@@ -12,16 +19,13 @@ export AbstractScalar,
        ScalarRef,
        OneHotScalar,
        @scalar,
-       asscalar,
-       simplify,
-       materialize,
-       pushforward,
-       differentiate
+       asscalar
 
 include("utils.jl")
 include("types.jl")
 include("simplify.jl")
 include("materialize.jl")
+include("substitute.jl")
 include("pushforward.jl")
 include("differentiate.jl")
 include("display.jl")
