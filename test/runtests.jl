@@ -566,6 +566,45 @@ using ScalarAlgebra
         @test simplify(d_2v1_wrt_v2) == ScalarConst(0)
     end
 
+    @testset "differentiate nonlinear" begin
+        x = ScalarSym{:x}()
+        y = ScalarSym{:y}()
+        fd(f, x0; h = 1e-6) = (f(x0 + h) - f(x0 - h)) / (2h)
+        x0 = 1.3
+
+        # unary chain rules: type-stable, numerically correct vs finite difference
+        for (expr, jl) in [
+            (exp(x),  exp),  (log(x),  log),  (sin(x), sin),
+            (cos(x),  cos),  (tan(x),  tan),  (sqrt(x), sqrt),
+            (abs(x),  abs),
+        ]
+            d = @inferred differentiate(expr, x)
+            @test d isa AbstractScalar
+            @test materialize(simplify(d), (x = x0,)) ≈ fd(jl, x0) atol = 1e-4
+        end
+
+        # sign: structurally zero derivative
+        d_sign = @inferred differentiate(sign(x), x)
+        @test materialize(simplify(d_sign), (x = x0,)) == 0.0
+
+        # power with constant exponent: d(x^3) = 3x^2
+        d_pow = @inferred differentiate(x^ScalarConst(3), x)
+        @test materialize(simplify(d_pow), (x = x0,)) ≈ fd(z -> z^3, x0) atol = 1e-4
+
+        # power with ScalarOne exponent: d(x^1) = 1
+        d_pow1 = @inferred differentiate(x^ScalarOne(Float64), x)
+        @test materialize(simplify(d_pow1), (x = x0,)) ≈ 1.0
+
+        # nested chain across two symbols: d(x*exp(y))/dy = x*exp(y)
+        d_chain = differentiate(x * exp(y), y)
+        @test materialize(simplify(d_chain), (x = 2.0, y = 0.5)) ≈ 2 * exp(0.5)
+
+        # unsupported / non-differentiable ops fail loudly (not MethodError)
+        @test_throws ArgumentError differentiate(min(x, y), x)
+        @test_throws ArgumentError differentiate(max(x, y), x)
+        @test_throws ArgumentError differentiate(x^y, x)
+    end
+
     @testset "StaticArray constructors" begin
         @scalar u Float64
         @scalar v Float32

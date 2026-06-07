@@ -78,6 +78,42 @@ _differentiate_ldiv(
 _differentiate_ldiv(((u, v), (du, dv))::Vararg{NTuple{2, AbstractScalar}, 2}) =
     u \ (dv - du * (u \ v))
 
+# unary nonlinear functions: chain rule  d f(u) = f'(u) * du.
+# Scalar-eltype only; f' is expressed back in the algebra.
+_differentiate_call(::typeof(exp), (u,)::Tuple{AbstractScalar}, (du,)::Tuple{AbstractScalar}) =
+    exp(u) * du
+_differentiate_call(::typeof(log), (u,)::Tuple{AbstractScalar}, (du,)::Tuple{AbstractScalar}) =
+    du / u
+_differentiate_call(::typeof(sin), (u,)::Tuple{AbstractScalar}, (du,)::Tuple{AbstractScalar}) =
+    cos(u) * du
+_differentiate_call(::typeof(cos), (u,)::Tuple{AbstractScalar}, (du,)::Tuple{AbstractScalar}) =
+    -sin(u) * du
+_differentiate_call(::typeof(tan), (u,)::Tuple{AbstractScalar}, (du,)::Tuple{AbstractScalar}) =
+    du / cos(u)^2
+_differentiate_call(::typeof(sqrt), (u,)::Tuple{AbstractScalar}, (du,)::Tuple{AbstractScalar}) =
+    du / (2 * sqrt(u))
+_differentiate_call(::typeof(abs), (u,)::Tuple{AbstractScalar}, (du,)::Tuple{AbstractScalar}) =
+    sign(u) * du
+# sign is piecewise-constant: derivative is structurally zero everywhere it exists.
+_differentiate_call(::typeof(sign), (u,)::Tuple{AbstractScalar}, (du,)::Tuple{AbstractScalar}) =
+    ScalarZero(eltype(du))
+
+# power with constant exponent:  d(u^c) = c*u^(c-1) * du  (dc = 0).
+_differentiate_call(::typeof(^), (u, c)::Tuple{AbstractScalar, ScalarConst},
+    (du, _)::NTuple{2, AbstractScalar}) = (c * u^(c.val - 1)) * du
+_differentiate_call(::typeof(^), (u, _)::Tuple{AbstractScalar, ScalarOne},
+    (du, _)::NTuple{2, AbstractScalar}) = du
+_differentiate_call(::typeof(^), ::Tuple{AbstractScalar, AbstractScalar},
+    ::NTuple{2, AbstractScalar}) = throw(ArgumentError(
+    "differentiate: u^v with non-constant exponent is unsupported"))
+
+# min/max have a value-dependent subgradient — not representable as a single
+# type-stable node. Fail loudly rather than leak a MethodError.
+_differentiate_call(::typeof(min), ::NTuple{2, AbstractScalar}, ::NTuple{2, AbstractScalar}) =
+    throw(ArgumentError("differentiate: min is not differentiable (value-dependent subgradient)"))
+_differentiate_call(::typeof(max), ::NTuple{2, AbstractScalar}, ::NTuple{2, AbstractScalar}) =
+    throw(ArgumentError("differentiate: max is not differentiable (value-dependent subgradient)"))
+
 # ScalarRef
 _wrap_scalar_index(idx::ScalarConst{<:Integer}) = ScalarConst(SVector(idx.val))
 _wrap_scalar_index(idx) = idx

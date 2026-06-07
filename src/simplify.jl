@@ -154,13 +154,17 @@ _simplify_ref_call(::typeof(\), args, indices) =
     _simplify_ref_ldiv(args, indices)
 # Index into a StaticArray constructor with constant integer indices: extract the
 # corresponding arg. Uses LinearIndices for cartesian→linear (column-major) conversion.
-# Type-unstable. Possible fix: wrap index in Static's `static` to preserve type info.
-#function _simplify_ref_call(
-#    ::Type{SA}, args, indices::Tuple{Vararg{ScalarConst{<:Integer}}}
-#) where {SA <: StaticArray}
-#    linear = LinearIndices(Tuple(Size(SA)))[map(a -> a.val, indices)...]
-#    args[linear]
-#end
+# Type-stable when the constructor args are homogeneous (e.g. SVector(u, u)[1]); for
+# heterogeneous args (SMatrix(a, b, c, d)[1, 2]) the result type is a small Union
+# because the index value lives in the value domain, not the type domain. Full
+# stability would require lifting the index into the type (Val/Static) so a
+# @generated extractor could read it — see follow-up note in the plan.
+function _simplify_ref_call(
+    ::Type{SA}, args, indices::Tuple{Vararg{ScalarConst{<:Integer}}}
+) where {SA <: StaticArray}
+    linear = LinearIndices(Tuple(Size(SA)))[map(a -> a.val, indices)...]
+    args[linear]
+end
 
 _simplify_ref_call(fn, args, indices) = ScalarRef(ScalarCall(fn, args), indices)
 

@@ -169,9 +169,11 @@ for op in (:+, :-, :*, :/, :\, :^, :min, :max)
 end
 
 # Intercept StaticArray constructors when the first arg is an AbstractScalar.
-# Remaining args are lifted via asscalar so mixed calls (e.g. SVector(u, 1.0))
-# are handled transparently. Gap: non-scalar-first mixed calls (SVector(1.0, u))
-# fall through to StaticArrays; use ScalarConst explicitly in that case.
+# Union{AbstractScalar, Any} collapses to Any in Julia's type system, so we
+# check the first arg at runtime. Remaining args are lifted via asscalar so
+# mixed calls (e.g. SVector(u, 1.0)) are handled transparently. Gap:
+# non-scalar-first mixed calls (SVector(1.0, u)) fall through to StaticArrays;
+# use ScalarConst explicitly in that case.
 function (::Type{SA})(x::AbstractScalar, xs...) where {SA <: StaticArray}
     args = (x, map(asscalar, xs)...)
     ScalarCall(_scalar_sa_type(SA, args), args)
