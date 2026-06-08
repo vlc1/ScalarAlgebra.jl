@@ -120,6 +120,34 @@ ScalarOne(::Type{<: AbstractScalar{T}}) where {T} = ScalarOne(T)
 ScalarOne(::T) where {T <: AbstractScalar} = ScalarOne(T)
 
 """
+    OneHotScalar{N, K}()
+    OneHotScalar(::Type{SVector{N, T}}, ::StaticInt{K})
+
+Bool-shaped structural one-hot basis vector `e_K ∈ SVector{N, Bool}` (a `1` at
+position `K`, zeros elsewhere). Like [`ScalarZero`](@ref)/[`ScalarOne`](@ref) it
+carries *structure*, not value: it materializes to `SVector{N, Bool}`, and the
+value element type comes from promotion at use sites (`x * e_K` is
+`SVector{N, Float64}`). The hot position `K` lives in the type, so indexing folds
+to a `ScalarOne`/`ScalarZero` **structurally** (see `_simplify_ref`), which lets
+dense Jacobians reconstructed from `pushforward` collapse to their sparse form
+instead of leaving dead `x*0.0`/`x*1.0` products. Seeded into `differentiate` via
+`_jvp_columns`.
+
+The outer constructor accepts the operand value-space type `SVector{N, T}` and
+normalizes to the Bool shape, mirroring `ScalarZero(::Type)`.
+"""
+struct OneHotScalar{N, K} <: AbstractScalar{SVector{N, Bool}}
+
+    function OneHotScalar{N, K}() where {N, K}
+        (N isa Int && K isa Int && 1 <= K <= N) || throw(ArgumentError(
+            "OneHotScalar{N,K}: need integer literals with 1 ≤ K ≤ N; got N=$(N), K=$(K)"))
+        new{N, K}()
+    end
+end
+
+OneHotScalar(::Type{SVector{N, T}}, ::StaticInt{K}) where {N, T, K} = OneHotScalar{N, K}()
+
+"""
     ScalarCall(fn, args::Tuple{Vararg{AbstractScalar}})
 
 Interior node of a scalar-tree: applies `fn` to scalar `args` component-wise.
@@ -209,31 +237,3 @@ Base.getindex(arr::AbstractScalar{<: AbstractArray}, i) =
 # IndexCartesian: exactly N integer indices for an N-D array eltype.
 Base.getindex(arr::AbstractScalar{<:AbstractArray{T, N}}, I::Vararg{Any, N}) where {T, N} =
     ScalarRef(arr, map(asscalar, I))
-
-"""
-    OneHotScalar{N, K}()
-    OneHotScalar(::Type{SVector{N, T}}, ::StaticInt{K})
-
-Bool-shaped structural one-hot basis vector `e_K ∈ SVector{N, Bool}` (a `1` at
-position `K`, zeros elsewhere). Like [`ScalarZero`](@ref)/[`ScalarOne`](@ref) it
-carries *structure*, not value: it materializes to `SVector{N, Bool}`, and the
-value element type comes from promotion at use sites (`x * e_K` is
-`SVector{N, Float64}`). The hot position `K` lives in the type, so indexing folds
-to a `ScalarOne`/`ScalarZero` **structurally** (see `_simplify_ref`), which lets
-dense Jacobians reconstructed from `pushforward` collapse to their sparse form
-instead of leaving dead `x*0.0`/`x*1.0` products. Seeded into `differentiate` via
-`_jvp_columns`.
-
-The outer constructor accepts the operand value-space type `SVector{N, T}` and
-normalizes to the Bool shape, mirroring `ScalarZero(::Type)`.
-"""
-struct OneHotScalar{N, K} <: AbstractScalar{SVector{N, Bool}}
-
-    function OneHotScalar{N, K}() where {N, K}
-        (N isa Int && K isa Int && 1 <= K <= N) || throw(ArgumentError(
-            "OneHotScalar{N,K}: need integer literals with 1 ≤ K ≤ N; got N=$(N), K=$(K)"))
-        new{N, K}()
-    end
-end
-
-OneHotScalar(::Type{SVector{N, T}}, ::StaticInt{K}) where {N, T, K} = OneHotScalar{N, K}()
