@@ -31,10 +31,6 @@ _unity_space(T::Type) = throw(ArgumentError(
     "ScalarOne: unsupported value-space type $T. Only Number and SVector{N} are " *
     "supported (matrix-valued symbols are out of scope)."))
 
-#_value_space(::Type{<: Number}) = Bool
-#_value_space(::Type{<: SMatrix{N, N, T}}) where {N, T} =
-#    similar_type(SVector{N, T}, Bool)
-
 # Resolve the fully-specified StaticArray type from a (possibly bare/partial) SA type
 # and a tuple of AbstractScalar args whose eltypes determine T.
 function _scalar_sa_type(::Type{SA}, args::Tuple) where {SA <: StaticArray}
