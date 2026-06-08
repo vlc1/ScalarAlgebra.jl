@@ -183,6 +183,47 @@ asscalar(x) = ScalarConst(x)
 
 Base.convert(::Type{<:AbstractScalar}, x) = ScalarConst(x)
 
+"""
+    asstatic(i)
+
+Lift an index to its `static`/`StaticInt`-carrying form, so symbolic indexing
+folds type-stably (see `_simplify_ref_call`, `src/simplify.jl`). Used by
+[`@staticref`](@ref). `Integer` → `static(i)`; `ScalarConst{<:Integer}` →
+`ScalarConst` of `static(val)`; already-static indices (`StaticInt`,
+`ScalarConst{<:StaticInt}`) and `Colon` pass through unchanged (idempotent — the
+macro wraps every index, including ones already static); anything else throws.
+Note `StaticInt` is not `<: Integer`, so it needs its own method.
+"""
+asstatic(i::Integer) = static(i)
+asstatic(i::StaticInt) = i
+asstatic(sc::ScalarConst{<:Integer}) = ScalarConst(static(sc.val))
+asstatic(sc::ScalarConst{<:StaticInt}) = sc
+asstatic(c::Colon) = c
+asstatic(x) = throw(ArgumentError(
+    "@staticref index must be an Integer, ScalarConst{<:Integer}, or Colon; got $(typeof(x))"))
+
+# Recursively wrap every `a[i...]` index with `asstatic`, leaving all other
+# syntax untouched. Recurses into the indexed object and the index expressions
+# (so nested refs like `u[v[1]]` are handled).
+_staticref(x) = x
+function _staticref(ex::Expr)
+    ex.head === :ref && return Expr(:ref, _staticref(ex.args[1]),
+        (:($asstatic($(_staticref(i)))) for i in ex.args[2:end])...)
+    Expr(ex.head, map(_staticref, ex.args)...)
+end
+
+"""
+    @staticref expr
+
+Rewrite `expr` so every array-index `a[i...]` becomes `a[asstatic(i)...]`,
+making indices `static` for type-stable folding without the syntactic noise.
+`@staticref SVector(u[2] * u[1], u[1])` ≡
+`SVector(u[static(2)] * u[static(1)], u[static(1)])`.
+"""
+macro staticref(expr)
+    esc(_staticref(expr))
+end
+
 # Unary operator overloads
 for op in (:-, :+, :exp, :sin, :cos, :tan, :log, :sqrt, :abs, :sign)
     @eval Base.$op(a::AbstractScalar) = ScalarCall($op, (a,))

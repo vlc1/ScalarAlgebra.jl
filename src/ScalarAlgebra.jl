@@ -19,7 +19,9 @@ export AbstractScalar,
        ScalarRef,
        OneHotScalar,
        @scalar,
-       asscalar
+       @staticref,
+       asscalar,
+       asstatic
 
 include("utils.jl")
 include("types.jl")

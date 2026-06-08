@@ -152,6 +152,37 @@ using AlgebraCore  # simplify, materialize, pushforward, differentiate, substitu
         @test sc_cart.indices isa Tuple{Vararg{AbstractScalar{Int}}}
     end
 
+    @testset "@staticref" begin
+        @scalar u SVector{2, Float64}
+
+        # asstatic on each accepted index form
+        @test asstatic(2) === static(2)
+        @test asstatic(static(2)) === static(2)            # idempotent on StaticInt
+        @test asstatic(ScalarConst(2)) isa ScalarConst{<:StaticInt}
+        @test asstatic(ScalarConst(2)) === ScalarConst(static(2))
+        @test asstatic(:) === Colon()
+        @test_throws ArgumentError asstatic(1.0)
+
+        # macro wraps every ref index → static-carrying ScalarRefs
+        m = @staticref SVector(u[2] * u[1], u[1])
+        ref = m.args[1].args[1]                              # u[2] inside the product
+        @test ref isa ScalarRef
+        @test ref.indices === (ScalarConst(static(2)),)
+        @test m.args[2].indices === (ScalarConst(static(1)),)
+
+        # equals the hand-written static form
+        @test m === SVector(u[static(2)] * u[static(1)], u[static(1)])
+
+        # static indices make the folded simplify type-stable and structural
+        s = @inferred simplify(m)
+        @test s === simplify(SVector(u[static(2)] * u[static(1)], u[static(1)]))
+
+        # Colon slices survive the rewrite
+        cref = @staticref u[:]
+        @test cref isa ScalarRef
+        @test cref.indices === (ScalarConst(Colon()),)
+    end
+
     @testset "simplify" begin
         x = ScalarSym{:x}()
         z = ScalarZero(Float64)
