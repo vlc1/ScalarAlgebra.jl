@@ -32,6 +32,9 @@ _simplify_call(::typeof(-), args) = _simplify_sub(args)
 _simplify_sub((a,)::Tuple{AbstractScalar}) = -a
 _simplify_sub((a, b)::Tuple{AbstractScalar, AbstractScalar}) = a - b
 
+# minus zero is zero
+_simplify_sub((a,)::Tuple{ScalarZero}) = a
+
 _simplify_sub((a, _)::Tuple{AbstractScalar, ScalarZero}) = a
 _simplify_sub((_, b)::Tuple{ScalarZero, AbstractScalar}) = -b
 _simplify_sub((a, b)::Tuple{ScalarZero, ScalarZero}) =

@@ -250,6 +250,11 @@ using AlgebraCore  # simplify, materialize, pushforward, differentiate, substitu
         @test result2 isa ScalarZero
         @test eltype(result2) === Bool
 
+        # unary minus zero is zero: -(0) = 0 (structural, same node)
+        result_mz = @inferred simplify(-z)
+        @test result_mz === z
+        @test result_mz isa ScalarZero{Bool}
+
         # negation: 0 - x = -x
         expr3 = z - x
         result3 = @inferred simplify(expr3)
