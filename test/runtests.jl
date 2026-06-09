@@ -479,17 +479,34 @@ using AlgebraCore  # simplify, materialize, pushforward, differentiate, substitu
         @scalar v SVector{2, Float64}
         @scalar i Int
 
-        @test materialize(x, (x = 3.0,)) === 3.0
-        @test materialize(ScalarConst(2.0), NamedTuple()) === 2.0
-        @test materialize(ScalarZero(Float64), NamedTuple()) === false
-        @test materialize(ScalarOne(Float64), NamedTuple()) === true
+        @test materialize(substitute(x, (x = 3.0,))) === 3.0
+        @test materialize(ScalarConst(2.0)) === 2.0
+        @test materialize(ScalarZero(Float64)) === false
+        @test materialize(ScalarOne(Float64)) === true
 
         pairs = (x = 2.0,)
-        @test materialize(x + ScalarConst(1.0), pairs) === 3.0
-        @test materialize(-x, pairs) === -2.0
+        @test materialize(substitute(x + ScalarConst(1.0), pairs)) === 3.0
+        @test materialize(substitute(-x, pairs)) === -2.0
 
         pairs_v = (v = SVector(1.0, 2.0), i = 2)
-        @test materialize(v[i], pairs_v) === 2.0
+        @test materialize(substitute(v[i], pairs_v)) === 2.0
+    end
+
+    @testset "isliteral" begin
+        @scalar x Float64
+        @scalar v SVector{2, Float64}
+        @scalar i Int
+
+        @test (@inferred isliteral(x)) === false
+        @test (@inferred isliteral(ScalarConst(1.0))) === true
+        @test (@inferred isliteral(ScalarZero(Float64))) === true
+        @test (@inferred isliteral(ScalarOne(Float64))) === true
+        @test (@inferred isliteral(OneHotScalar{3, 2}())) === true
+        # composites recurse: a free symbol anywhere → not literal
+        @test (@inferred isliteral(x + ScalarConst(1.0))) === false
+        @test (@inferred isliteral(ScalarConst(2.0) + ScalarConst(1.0))) === true
+        @test (@inferred isliteral(v[i])) === false
+        @test (@inferred isliteral(substitute(x + ScalarConst(1.0), (x = 2.0,)))) === true
     end
 
     @testset "substitute" begin
@@ -503,12 +520,12 @@ using AlgebraCore  # simplify, materialize, pushforward, differentiate, substitu
         @test r isa ScalarCall{typeof(+)}
         @test r.args[1] === ScalarConst(1.0)
         @test r.args[2] === y
-        @test materialize(r, (y = 4.0,)) === materialize(x + y, (x = 1.0, y = 4.0))
+        @test materialize(substitute(r, (y = 4.0,))) === materialize(substitute(x + y, (x = 1.0, y = 4.0)))
 
         # expression binding splices a subtree
         r2 = substitute(x, (x = y + ScalarConst(1.0),))
         @test r2 isa ScalarCall{typeof(+)}
-        @test materialize(r2, (y = 2.0,)) === 3.0
+        @test materialize(substitute(r2, (y = 2.0,))) === 3.0
 
         # AbstractScalar binding passed through via asscalar (idempotent)
         @test substitute(x, (x = y,)) === y
@@ -521,12 +538,12 @@ using AlgebraCore  # simplify, materialize, pushforward, differentiate, substitu
         # array symbol + ScalarRef + index substitution
         rr = substitute(v[i], (v = SVector(5.0, 6.0), i = 2))
         @test rr isa ScalarRef
-        @test materialize(rr, NamedTuple()) === 6.0
+        @test materialize(rr) === 6.0
 
         # round-trip equivalence with materialize across a small tree
         expr = (2 * x + v[i]) / y
         full = (x = 1.5, v = SVector(3.0, 4.0), i = 1, y = 2.0)
-        @test materialize(substitute(expr, full), NamedTuple()) === materialize(expr, full)
+        @test materialize(substitute(expr, full)) === (2 * 1.5 + SVector(3.0, 4.0)[1]) / 2.0
 
         # type stability (each call is a distinct specialization → single branch)
         @test (@inferred substitute(x, (x = 1.0,))) === ScalarConst(1.0)
@@ -554,31 +571,31 @@ using AlgebraCore  # simplify, materialize, pushforward, differentiate, substitu
         # d(x)/dv: scalar out, vector in → 1×2 zero row
         d_sv = @inferred differentiate(x, v)
         @test eltype(d_sv) === SMatrix{1,2,Bool,2}
-        @test materialize(simplify(d_sv), NamedTuple()) == SMatrix{1,2,Bool}(false, false)
+        @test materialize(simplify(d_sv)) == SMatrix{1,2,Bool}(false, false)
 
         # scalar chain rules, via the JVP core (vs finite differences)
         @test @inferred(differentiate(x + y, x)) isa AbstractScalar
         for (e, jl) in [(x * y, (a, b) -> b), (x / y, (a, b) -> 1 / b), (x \ y, (a, b) -> -b / a^2)]
-            @test materialize(simplify(differentiate(e, x)), (x = 2.0, y = 5.0)) ≈ jl(2.0, 5.0)
+            @test materialize(substitute(simplify(differentiate(e, x)), (x = 2.0, y = 5.0))) ≈ jl(2.0, 5.0)
         end
 
         # dense Jacobians (vector input) reconstructed from JVP, vs finite differences
         # d(x*v)/dv = x*I
         Jxv = @inferred differentiate(x * v, v)
         @test eltype(Jxv) === SMatrix{2,2,Float64,4}
-        @test materialize(simplify(Jxv), (x = 2.5,)) ≈ SMatrix{2,2}(2.5, 0.0, 0.0, 2.5)
+        @test materialize(substitute(simplify(Jxv), (x = 2.5,))) ≈ SMatrix{2,2}(2.5, 0.0, 0.0, 2.5)
         # d(v[1]*w)/dv — the outer-product case: value-space products, no operand swap
         J1w = differentiate(v[ScalarConst(1)] * w, v)
-        @test materialize(simplify(J1w), (w = SVector(2.0, 3.0), v = SVector(0.0, 0.0))) ≈
+        @test materialize(substitute(simplify(J1w), (w = SVector(2.0, 3.0), v = SVector(0.0, 0.0)))) ≈
             fdj(vv -> vv[1] .* [2.0, 3.0], [0.0, 0.0])
         # gradient: scalar built from a vector → 1×2 row
         g = differentiate(v[ScalarConst(1)] / v[ScalarConst(2)], v)
         @test eltype(g) === SMatrix{1,2,Float64,2}
-        @test materialize(simplify(g), (v = SVector(2.0, 4.0),)) ≈ fdj(vv -> [vv[1] / vv[2]], [2.0, 4.0])
+        @test materialize(substitute(simplify(g), (v = SVector(2.0, 4.0),))) ≈ fdj(vv -> [vv[1] / vv[2]], [2.0, 4.0])
         # column: vector out, scalar in
         c = differentiate(sin(x) * v, x)
         @test eltype(c) === SVector{2,Float64}
-        @test materialize(simplify(c), (x = 0.7, v = SVector(1.0, 2.0))) ≈
+        @test materialize(substitute(simplify(c), (x = 0.7, v = SVector(1.0, 2.0)))) ≈
             (sin(0.7 + 1e-6) .* [1.0, 2.0] .- sin(0.7 - 1e-6) .* [1.0, 2.0]) ./ 2e-6
 
         # scalar literal × / \ array (must not regress)
@@ -601,7 +618,7 @@ using AlgebraCore  # simplify, materialize, pushforward, differentiate, substitu
         # like differentiate(v, v) === ScalarOne{SMatrix{N,N,Bool}}.
         d_v1_v = differentiate(v[ScalarConst(1)], v)
         @test eltype(d_v1_v) === SMatrix{1,2,Bool,2}
-        @test materialize(simplify(d_v1_v), NamedTuple()) == SMatrix{1,2}(true, false)
+        @test materialize(simplify(d_v1_v)) == SMatrix{1,2}(true, false)
         # d(2v[1])/d(v[2]) = 0
         @test simplify(differentiate(2v[ScalarConst(1)], v[ScalarConst(2)])) == ScalarConst(0)
     end
@@ -611,7 +628,7 @@ using AlgebraCore  # simplify, materialize, pushforward, differentiate, substitu
         oh = @inferred OneHotScalar{3, 2}()
         @test oh isa AbstractScalar{SVector{3, Bool}}
         @test eltype(oh) === SVector{3, Bool}
-        @test materialize(oh, NamedTuple()) === SVector(false, true, false)
+        @test materialize(oh) === SVector(false, true, false)
         @test sprint(show, oh) == "e2"
         @test (@inferred OneHotScalar(SVector{3, Float64}, static(2))) isa OneHotScalar{3, 2}
         @test_throws ArgumentError OneHotScalar{3, 4}()   # K > N
@@ -640,7 +657,7 @@ using AlgebraCore  # simplify, materialize, pushforward, differentiate, substitu
         @test count(a -> a === x, s.args) == 3
         @test count(a -> a isa ScalarZero, s.args) == 6
         # values unchanged
-        @test materialize(s, (x = 2.5,)) ≈ SMatrix{3,3}(2.5,0.0,0.0, 0.0,2.5,0.0, 0.0,0.0,2.5)
+        @test materialize(substitute(s, (x = 2.5,))) ≈ SMatrix{3,3}(2.5,0.0,0.0, 0.0,2.5,0.0, 0.0,0.0,2.5)
 
         # self-derivative still the clean identity node
         @test (@inferred differentiate(v, v)) isa ScalarOne{SMatrix{3,3,Bool,9}}
@@ -654,12 +671,12 @@ using AlgebraCore  # simplify, materialize, pushforward, differentiate, substitu
         # (B) derivative w.r.t. a static-indexed element folds structurally
         @test (@inferred simplify(differentiate(v[static(1)], v[static(2)]))) isa ScalarZero{Bool}
         @test (@inferred simplify(differentiate(v[static(2)], v[static(2)]))) isa ScalarOne{Bool}
-        @test materialize(simplify(differentiate(v[static(1)], v[static(2)])), NamedTuple()) === false
-        @test materialize(simplify(differentiate(v[static(2)], v[static(2)])), NamedTuple()) === true
+        @test materialize(simplify(differentiate(v[static(1)], v[static(2)]))) === false
+        @test materialize(simplify(differentiate(v[static(2)], v[static(2)]))) === true
         # vector f → one-hot column
         col = @inferred simplify(differentiate(v, v[static(1)]))
         @test col isa OneHotScalar{3, 1}
-        @test materialize(col, NamedTuple()) === SVector(true, false, false)
+        @test materialize(col) === SVector(true, false, false)
         # static indices also sparsify the product-rule Jacobian
         @test simplify(differentiate(v[static(1)] * w, v[static(1)])) === w
 
@@ -692,24 +709,24 @@ using AlgebraCore  # simplify, materialize, pushforward, differentiate, substitu
         ]
             d = @inferred differentiate(expr, x)
             @test d isa AbstractScalar
-            @test materialize(simplify(d), (x = x0,)) ≈ fd(jl, x0) atol = 1e-4
+            @test materialize(substitute(simplify(d), (x = x0,))) ≈ fd(jl, x0) atol = 1e-4
         end
 
         # sign: structurally zero derivative
         d_sign = @inferred differentiate(sign(x), x)
-        @test materialize(simplify(d_sign), (x = x0,)) == 0.0
+        @test materialize(substitute(simplify(d_sign), (x = x0,))) == 0.0
 
         # power with constant exponent: d(x^3) = 3x^2
         d_pow = @inferred differentiate(x^ScalarConst(3), x)
-        @test materialize(simplify(d_pow), (x = x0,)) ≈ fd(z -> z^3, x0) atol = 1e-4
+        @test materialize(substitute(simplify(d_pow), (x = x0,))) ≈ fd(z -> z^3, x0) atol = 1e-4
 
         # power with ScalarOne exponent: d(x^1) = 1
         d_pow1 = @inferred differentiate(x^ScalarOne(Float64), x)
-        @test materialize(simplify(d_pow1), (x = x0,)) ≈ 1.0
+        @test materialize(substitute(simplify(d_pow1), (x = x0,))) ≈ 1.0
 
         # nested chain across two symbols: d(x*exp(y))/dy = x*exp(y)
         d_chain = differentiate(x * exp(y), y)
-        @test materialize(simplify(d_chain), (x = 2.0, y = 0.5)) ≈ 2 * exp(0.5)
+        @test materialize(substitute(simplify(d_chain), (x = 2.0, y = 0.5))) ≈ 2 * exp(0.5)
 
         # unsupported / non-differentiable ops fail loudly (not MethodError)
         @test_throws ArgumentError differentiate(min(x, y), x)
@@ -747,9 +764,9 @@ using AlgebraCore  # simplify, materialize, pushforward, differentiate, substitu
         @test eltype(sm) === SMatrix{2,2,Float64,4}
 
         # materialize round-trips
-        @test materialize(sv, (u = 2.0,)) === SVector(2.0, 2.0)
-        @test materialize(sv2, (u = 3.0,)) === SVector(3.0, 1.0)
-        @test materialize(sm, (u = 1.0,)) === SMatrix{2,2}(1.0, 1.0, 1.0, 1.0)
+        @test materialize(substitute(sv, (u = 2.0,))) === SVector(2.0, 2.0)
+        @test materialize(substitute(sv2, (u = 3.0,))) === SVector(3.0, 1.0)
+        @test materialize(substitute(sm, (u = 1.0,))) === SMatrix{2,2}(1.0, 1.0, 1.0, 1.0)
 
         # display
         @test sprint(show, sv) == "SVector(u, u)"

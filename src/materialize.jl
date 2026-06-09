@@ -1,15 +1,25 @@
-# `materialize` is owned by AlgebraCore; these methods extend it for AbstractScalar.
-# Evaluate a scalar expression tree by substituting symbol bindings from `pairs`.
-materialize(sc::ScalarSym{S}, pairs::NamedTuple) where {S} = pairs[S]
-materialize(sc::ScalarConst, ::NamedTuple) = sc.val
-materialize(::ScalarZero{T}, ::NamedTuple) where {T} = zero(T)
-materialize(::ScalarOne{T}, ::NamedTuple) where {T} = one(T)
-materialize(::OneHotScalar{N, K}, ::NamedTuple) where {N, K} =
+# `isliteral` and `materialize` are owned by AlgebraCore; these methods extend
+# them for AbstractScalar.
+
+# An expression is literal (materializable) iff it contains no free symbols.
+# Inferred entirely from types.
+isliteral(sc::AbstractScalar) = isliteral(typeof(sc))
+isliteral(::Type{<:AbstractScalar}) = true
+isliteral(::Type{<:ScalarSym}) = false
+@generated isliteral(::Type{<:ScalarCall{F, A}}) where {F, A} =
+    all(isliteral, A.parameters)
+@generated isliteral(::Type{<:ScalarRef{A, I}}) where {A, I} =
+    isliteral(A) && all(p -> !(p <: AbstractScalar) || isliteral(p), I.parameters)
+
+# Evaluate a literal scalar expression tree to a concrete value.
+materialize(sc::ScalarConst) = sc.val
+materialize(::ScalarZero{T}) where {T} = zero(T)
+materialize(::ScalarOne{T}) where {T} = one(T)
+materialize(::OneHotScalar{N, K}) where {N, K} =
     SVector{N, Bool}(ntuple(m -> m == K, N))
-materialize(sc::ScalarCall, pairs::NamedTuple) =
-    sc.fn(map(a -> materialize(a, pairs), sc.args)...)
-materialize(sc::ScalarRef, pairs::NamedTuple) =
-    materialize(sc.arr, pairs)[map(i -> materialize(i, pairs), sc.indices)...]
+materialize(sc::ScalarCall) = sc.fn(map(materialize, sc.args)...)
+materialize(sc::ScalarRef) =
+    materialize(sc.arr)[map(materialize, sc.indices)...]
 #
 #Base.convert(::Type{Expr}, sc::ScalarSym{S}) where {S} = :($S::$(eltype(sc)))
 #Base.convert(::Type{Expr}, sc::ScalarConst) = :($(sc.val)::$(eltype(sc)))

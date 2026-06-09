@@ -6,6 +6,7 @@ using Static
 # The algebra verbs are owned by AlgebraCore; ScalarAlgebra extends them.
 import AlgebraCore: simplify,
                     substitute,
+                    isliteral,
                     materialize,
                     pushforward,
                     differentiate
